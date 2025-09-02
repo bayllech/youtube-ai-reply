@@ -39,7 +39,7 @@ class OptionsManager {
         '很高兴你喜欢我的音乐！🎶',
         '你的评论让我很开心！😊'
       ],
-      skipRules: [
+      localReplyRules: [
         '纯表情符号',
         '单个字或标点',
         '无意义的字符'
@@ -58,8 +58,8 @@ class OptionsManager {
     // 更新预置回复列表
     this.updatePresetReplies();
     
-    // 更新跳过规则列表
-    this.updateSkipRules();
+    // 更新本地回复规则列表
+    this.updateLocalReplyRules();
   }
 
   updatePresetReplies() {
@@ -94,12 +94,12 @@ class OptionsManager {
     }
   }
 
-  updateSkipRules() {
+  updateLocalReplyRules() {
     const container = document.getElementById('skipRules');
     container.innerHTML = '';
     
-    if (this.settings.skipRules && this.settings.skipRules.length > 0) {
-      this.settings.skipRules.forEach((rule, index) => {
+    if (this.settings.localReplyRules && this.settings.localReplyRules.length > 0) {
+      this.settings.localReplyRules.forEach((rule, index) => {
         const item = document.createElement('div');
         item.className = 'rule-item';
         
@@ -107,14 +107,14 @@ class OptionsManager {
         input.type = 'text';
         input.value = rule;
         input.addEventListener('input', (e) => {
-          this.updateSkipRule(index, e.target.value);
+          this.updateLocalReplyRule(index, e.target.value);
         });
         
         const deleteBtn = document.createElement('button');
         deleteBtn.className = 'btn btn-danger';
         deleteBtn.textContent = '删除';
         deleteBtn.addEventListener('click', () => {
-          this.deleteSkipRule(index);
+          this.deleteLocalReplyRule(index);
         });
         
         item.appendChild(input);
@@ -122,7 +122,7 @@ class OptionsManager {
         container.appendChild(item);
       });
     } else {
-      container.innerHTML = '<p style="color: #6c757d; text-align: center; padding: 20px;">暂无跳过规则</p>';
+      container.innerHTML = '<p style="color: #6c757d; text-align: center; padding: 20px;">暂无本地回复规则</p>';
     }
   }
 
@@ -174,11 +174,11 @@ class OptionsManager {
       });
     });
     
-    // 跳过规则相关
+    // 本地回复规则相关
     const addSkipRuleBtn = document.getElementById('addSkipRuleBtn');
     if (addSkipRuleBtn) {
       addSkipRuleBtn.addEventListener('click', () => {
-        this.addSelectedSkipRule();
+        this.addSelectedLocalReplyRule();
       });
     }
     
@@ -244,63 +244,63 @@ class OptionsManager {
     }
   }
 
-  async addSkipRule() {
+  async addLocalReplyRule() {
     const input = document.getElementById('newSkipRule');
     const rule = input.value.trim();
     
     if (!rule) {
-      this.showNotification('请输入跳过规则', 'error');
+      this.showNotification('请输入本地回复规则', 'error');
       return;
     }
     
-    if (!this.settings.skipRules) {
-      this.settings.skipRules = [];
+    if (!this.settings.localReplyRules) {
+      this.settings.localReplyRules = [];
     }
     
-    this.settings.skipRules.push(rule);
+    this.settings.localReplyRules.push(rule);
     input.value = '';
-    this.updateSkipRules();
-    this.showNotification('跳过规则已添加', 'success');
+    this.updateLocalReplyRules();
+    this.showNotification('本地回复规则已添加', 'success');
   }
 
-  updateSkipRule(index, value) {
-    if (this.settings.skipRules && this.settings.skipRules[index]) {
-      this.settings.skipRules[index] = value;
+  updateLocalReplyRule(index, value) {
+    if (this.settings.localReplyRules && this.settings.localReplyRules[index]) {
+      this.settings.localReplyRules[index] = value;
       // 显示编辑提示
-      this.showNotification('跳过规则已修改', 'info');
+      this.showNotification('本地回复规则已修改', 'info');
     }
   }
 
-  deleteSkipRule(index) {
-    if (this.settings.skipRules && this.settings.skipRules[index]) {
-      this.settings.skipRules.splice(index, 1);
-      this.updateSkipRules();
-      this.showNotification('跳过规则已删除', 'success');
+  deleteLocalReplyRule(index) {
+    if (this.settings.localReplyRules && this.settings.localReplyRules[index]) {
+      this.settings.localReplyRules.splice(index, 1);
+      this.updateLocalReplyRules();
+      this.showNotification('本地回复规则已删除', 'success');
     }
   }
 
-  addSelectedSkipRule() {
+  addSelectedLocalReplyRule() {
     const select = document.getElementById('skipRuleSelect');
     const rule = select.value;
     
     if (!rule) {
-      this.showNotification('请先选择一个跳过规则', 'warning');
+      this.showNotification('请先选择一个本地回复规则', 'warning');
       return;
     }
     
     // 检查是否已存在
-    if (this.settings.skipRules && this.settings.skipRules.includes(rule)) {
+    if (this.settings.localReplyRules && this.settings.localReplyRules.includes(rule)) {
       this.showNotification('该规则已存在', 'warning');
       return;
     }
     
-    if (!this.settings.skipRules) {
-      this.settings.skipRules = [];
+    if (!this.settings.localReplyRules) {
+      this.settings.localReplyRules = [];
     }
     
-    this.settings.skipRules.push(rule);
+    this.settings.localReplyRules.push(rule);
     select.value = ''; // 重置选择
-    this.updateSkipRules();
+    this.updateLocalReplyRules();
     this.showNotification(`已添加规则: ${rule}`, 'success');
   }
 

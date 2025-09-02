@@ -23,7 +23,7 @@ class YouTubeAIReply {
         '很高兴你喜欢我的音乐！🎶',
         '你的评论让我很开心！😊'
       ],
-      skipRules: [
+      localReplyRules: [
         '纯表情符号',
         '单个字或标点',
         '无意义的字符'
@@ -90,14 +90,14 @@ class YouTubeAIReply {
 
   // 检查是否应该使用预置回复
   shouldUsePresetReply(commentText, config) {
-    if (!config.skipRules || !config.presetReplies || config.presetReplies.length === 0) {
+    if (!config.localReplyRules || !config.presetReplies || config.presetReplies.length === 0) {
       return false;
     }
 
     const text = commentText.trim();
     
-    // 检查是否符合跳过规则
-    return config.skipRules.some(rule => {
+    // 检查是否符合本地回复规则
+    return config.localReplyRules.some(rule => {
       switch(rule) {
         case '纯表情符号':
           return /^[\s\S]*?[\p{Emoji_Presentation}\p{Emoji}\u200D]+[\s\S]*?$/u.test(text) && text.length < 10;
