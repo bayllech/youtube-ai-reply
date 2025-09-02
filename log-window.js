@@ -51,6 +51,7 @@ class FloatingLogWindow {
             <div id="youtube-reply-log-header">
                 <span>YouTube AI Reply 日志</span>
                 <div class="header-controls">
+                    <button id="youtube-reply-log-reset">重置设置</button>
                     <button id="youtube-reply-log-clear">清空</button>
                     <button id="youtube-reply-log-close">×</button>
                 </div>
@@ -287,6 +288,10 @@ class FloatingLogWindow {
         document.body.appendChild(this.window);
 
         // Setup buttons
+        document.getElementById('youtube-reply-log-reset').addEventListener('click', () => {
+            this.resetSettings();
+        });
+
         document.getElementById('youtube-reply-log-clear').addEventListener('click', () => {
             this.clearLogs();
         });
@@ -487,6 +492,54 @@ class FloatingLogWindow {
         const content = this.panel.querySelector('#youtube-reply-log-content');
         if (content) {
             content.innerHTML = '';
+        }
+    }
+    
+    async resetSettings() {
+        try {
+            const defaultSettings = {
+                enabled: false,
+                apiKey: '',
+                replyDelay: 3000,
+                replyStyle: 'friendly',
+                maxRepliesPerSession: 10,
+                autoReplyEnabled: false,
+                aiRole: `我的频道内容是关于AI MUSIC的，一位AI美女歌手演唱，歌手名叫Bella，来自瑞典，年龄25岁。
+你是一个友好的AI助手，会根据频道评论内容,以Bella第一人称角度生成合适的回复。
+1.回复的文本在可以适当加入emoji表情
+2.无法理解的直接回复一颗💗`,
+                presetReplies: [
+                    '感谢你的评论！💖',
+                    '谢谢你的支持！🎵',
+                    '很高兴你喜欢我的音乐！🎶',
+                    '你的评论让我很开心！😊'
+                ],
+                localReplyRules: [
+                    '纯表情符号',
+                    '单个字或标点',
+                    '无意义的字符'
+                ]
+            };
+            
+            // 保存默认设置
+            const response = await chrome.runtime.sendMessage({ 
+                action: 'saveSettings', 
+                settings: defaultSettings 
+            });
+            
+            if (response && response.success) {
+                this.addLog('success', '设置已重置为默认值');
+                
+                // 通知页面重新加载设置
+                if (window.commentMonitor) {
+                    window.commentMonitor.loadSettings();
+                }
+            } else {
+                throw new Error('保存失败');
+            }
+            
+        } catch (error) {
+            this.addLog('error', '重置设置失败: ' + error.message);
         }
     }
     

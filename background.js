@@ -227,9 +227,24 @@ const youtubeAIReply = new YouTubeAIReply();
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   switch (request.action) {
     case 'generateReply':
-      youtubeAIReply.generateReply(request.commentText, request.replyStyle)
-        .then(reply => sendResponse({ success: true, reply }))
-        .catch(error => sendResponse({ success: false, error: error.message }));
+      // 使用立即执行函数避免消息通道问题
+      (async () => {
+        try {
+          // 添加超时处理
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('API请求超时')), 30000);
+          });
+          
+          const reply = await Promise.race([
+            youtubeAIReply.generateReply(request.commentText, request.replyStyle),
+            timeoutPromise
+          ]);
+          
+          sendResponse({ success: true, reply });
+        } catch (error) {
+          sendResponse({ success: false, error: error.message });
+        }
+      })();
       return true; // Keep message channel open for async response
 
     case 'getSettings':
@@ -249,6 +264,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       console.log('Settings updated:', request.settings);
       sendResponse({ success: true });
       break;
+      
+    case 'saveSettings':
+      // 保存设置
+      (async () => {
+        try {
+          await chrome.storage.sync.set({ settings: request.settings });
+          sendResponse({ success: true });
+        } catch (error) {
+          sendResponse({ success: false, error: error.message });
+        }
+      })();
+      return true;
   }
 });
 

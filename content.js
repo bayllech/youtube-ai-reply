@@ -6,18 +6,44 @@ class YouTubeCommentMonitor {
     this.recentlyProcessed = new Set(); // For preventing rapid duplicate processing
     this.replyQueue = [];
     this.isProcessing = false;
+    this.isProcessingQueue = false; // 新增：队列处理状态
+    this.isProcessingComments = false; // 防止重复处理评论
     this.settings = null;
     this.lastProcessedTexts = new Map(); // Track recently processed texts by position
     this.isScrolling = false;
     this.lastScrollTime = 0;
     this.scrollCheckInterval = null;
     this.sessionReplyCount = 0; // 会话回复计数器
+    this.lastActivityTime = Date.now(); // 最后活动时间
+    this.inactivityTimer = null; // 不活动定时器
     
     this.init();
   }
 
+  clearCacheOnPageReload() {
+    // 使用 sessionStorage 来检测页面刷新
+    const reloadKey = 'youtube-reply-reload-time';
+    const lastReload = sessionStorage.getItem(reloadKey);
+    const now = Date.now();
+    
+    if (!lastReload || now - parseInt(lastReload) > 1000) {
+      // 新加载或距离上次刷新超过1秒，清空缓存
+      this.processedComments.clear();
+      this.recentlyProcessed.clear();
+      this.lastProcessedTexts.clear();
+      if (window.youtubeReplyLog) {
+        window.youtubeReplyLog.info('页面已刷新，清空评论缓存');
+      }
+    }
+    
+    sessionStorage.setItem(reloadKey, now.toString());
+  }
+
   async init() {
     // console.log('YouTube AI Reply content script loaded');
+    
+    // 页面刷新时清空缓存
+    this.clearCacheOnPageReload();
     
     // 重置会话回复计数器
     this.sessionReplyCount = 0;
@@ -50,6 +76,11 @@ class YouTubeCommentMonitor {
     
     // Setup scroll detection logging
     this.setupScrollDetection();
+    
+    // Setup activity monitoring will be called after init
+    setTimeout(() => {
+      this.setupActivityMonitoring();
+    }, 1000);
   }
 
   async loadSettings() {
@@ -59,7 +90,12 @@ class YouTubeCommentMonitor {
       if (response && response.success) {
         // 复制设置，保持autoReplyEnabled的原始值
         this.settings = { ...response.settings };
-        window.youtubeReplyLog?.info('设置已加载:', { autoReply: this.settings.autoReplyEnabled });
+        window.youtubeReplyLog?.info('设置已加载:', JSON.stringify({
+          autoReplyEnabled: this.settings.autoReplyEnabled,
+          hasApiKey: !!this.settings.apiKey,
+          replyDelay: this.settings.replyDelay,
+          maxRepliesPerSession: this.settings.maxRepliesPerSession
+        }));
         
         // 初始化日志显示的最大回复数
         if (window.youtubeReplyLog) {
@@ -113,10 +149,16 @@ class YouTubeCommentMonitor {
         const newSettings = changes.settings.newValue;
         this.settings = newSettings;
         
-        // 如果自动回复被关闭，重置会话计数
+        // 如果自动回复被关闭，立即停止所有动作
         if (oldSettings && oldSettings.autoReplyEnabled && !newSettings.autoReplyEnabled) {
+          window.youtubeReplyLog?.status('⛔ 自动回复已手动关闭，停止所有动作');
+          this.stopAutoReply();
+          this.stopAutoScroll();
+          this.replyQueue = [];
+          this.isProcessingQueue = false;
+          this.isProcessingComments = false;
           this.sessionReplyCount = 0;
-          window.youtubeReplyLog?.info('自动回复已关闭，重置会话计数');
+          return;
         }
         
         // 如果最大回复数设置有变化，更新显示
@@ -167,9 +209,16 @@ class YouTubeCommentMonitor {
       return;
     }
 
+    // 添加防抖机制，避免短时间内重复处理
+    let debounceTimer;
     this.observer = new MutationObserver((mutations) => {
-      mutations.forEach((mutation) => {
-        mutation.addedNodes.forEach((node) => {
+      // 清除之前的定时器
+      clearTimeout(debounceTimer);
+      
+      // 设置新的定时器，延迟100ms处理
+      debounceTimer = setTimeout(() => {
+        mutations.forEach((mutation) => {
+          mutation.addedNodes.forEach((node) => {
           if (node.nodeType === Node.ELEMENT_NODE) {
             // Skip UI elements that can't contain comments
             const tagName = node.tagName.toLowerCase();
@@ -186,7 +235,7 @@ class YouTubeCommentMonitor {
             if (node.id === 'content-text' || node.classList.contains('yt-core-attributed-string')) {
               const text = node.textContent || '';
               // Skip if this looks like our own reply or UI text
-              if (text.trim().length > 10 && 
+              if (text.trim().length > 0 && 
                   !text.includes('Reply') && 
                   !text.includes('Share') &&
                   !this.isOwnReply(text)) {
@@ -199,7 +248,7 @@ class YouTubeCommentMonitor {
               commentTexts.forEach(comment => {
                 const text = comment.textContent || '';
                 // Skip if this looks like our own reply or UI text
-                if (text.trim().length > 10 && 
+                if (text.trim().length > 0 && 
                     !text.includes('Reply') && 
                     !text.includes('Share') &&
                     !this.isOwnReply(text)) {
@@ -211,6 +260,7 @@ class YouTubeCommentMonitor {
           }
         });
       });
+      }, 100); // 100ms防抖延迟
     });
 
     this.observer.observe(commentsSection, {
@@ -226,6 +276,20 @@ class YouTubeCommentMonitor {
     
     // Start auto-scroll to load more comments
     this.startAutoScroll();
+    
+    // 定期检查是否有遗漏的评论（添加防抖机制）
+    this.commentCheckInterval = setInterval(() => {
+      if (!this.isProcessingQueue && !this.isProcessingComments && 
+          this.settings?.autoReplyEnabled &&
+          (!this.settings?.maxRepliesPerSession || 
+           this.sessionReplyCount < this.settings.maxRepliesPerSession)) {
+        // 添加防抖，避免短时间内重复调用
+        if (!this.lastCheckTime || Date.now() - this.lastCheckTime > 5000) {
+          this.lastCheckTime = Date.now();
+          this.processExistingComments();
+        }
+      }
+    }, 30000); // 每30秒检查一次
   }
 
   isCommentElement(element) {
@@ -275,33 +339,127 @@ class YouTubeCommentMonitor {
 
   processExistingComments() {
     try {
-      // console.log('Processing existing comments...');
-      const existingComments = document.querySelectorAll('ytd-comment-thread-renderer #content-text, ytd-comment-renderer #content-text, ytcp-comment #content-text, #content-text.yt-core-attributed-string');
-      // console.log('Found', existingComments.length, 'existing comments');
-      existingComments.forEach(comment => {
-        // Only process if this looks like actual comment text and not our own reply
-        const text = comment.textContent || '';
-        if (text.trim().length > 10 && !this.isOwnReply(text)) {
-          this.processNewComment(comment);
+      // 防止重复处理
+      if (this.isProcessingComments) {
+        const stack = new Error().stack;
+        window.youtubeReplyLog?.debug('正在处理评论中，跳过重复调用');
+        window.youtubeReplyLog?.debug(`调用栈: ${stack.split('\n').slice(3, 6).join('\n')}`);
+        return;
+      }
+      
+      // 检查是否达到回复限制
+      if (this.settings?.maxRepliesPerSession && 
+          this.sessionReplyCount >= this.settings.maxRepliesPerSession) {
+        window.youtubeReplyLog?.debug('已达到回复限制，跳过评论扫描');
+        return;
+      }
+      
+      this.isProcessingComments = true;
+      window.youtubeReplyLog?.debug('开始处理现有评论...');
+      
+      // 查找所有评论元素，使用更精确的选择器
+      const existingComments = document.querySelectorAll(
+        'ytcp-comment-thread ytcp-comment #content-text, ' +
+        'ytcp-comment #content-text, ' +
+        '#content-text.yt-core-attributed-string'
+      );
+      
+      let processedCount = 0;
+      let newCount = 0;
+      
+      // 如果队列为空，找出所有未处理的评论
+      if (this.replyQueue.length === 0) {
+        // 按位置排序，确保从上到下处理
+        const commentsArray = Array.from(existingComments).map(comment => ({
+          element: comment,
+          text: this.extractCommentText(comment),
+          id: this.getCommentId(comment),
+          position: this.getElementPosition(comment)
+        })).filter(comment => 
+          !this.processedComments.has(comment.id) && 
+          comment.text && 
+          comment.text.trim().length > 0
+        ).sort((a, b) => a.position - b.position);
+        
+        // 批量添加到队列
+        window.youtubeReplyLog?.debug('准备添加到队列的评论列表:');
+        commentsArray.forEach((comment, index) => {
+          window.youtubeReplyLog?.debug(`  ${index + 1}. 位置: ${comment.position}px, 内容: ${comment.text.substring(0, 30)}...`);
+        });
+        
+        commentsArray.forEach(comment => {
+          this.processedComments.add(comment.id);
+          this.replyQueue.push({
+            commentId: comment.id,
+            commentText: comment.text,
+            element: comment.element,
+            timestamp: Date.now(),
+            position: comment.position
+          });
+          newCount++;
+        });
+        
+        if (newCount > 0) {
+          window.youtubeReplyLog?.info(`发现 ${newCount} 条新评论需要处理，已加入队列`);
+          
+          // 如果队列没有在处理中，则开始处理
+          if (!this.isProcessingQueue) {
+            this.processReplyQueue();
+          }
         }
-      });
+      } else {
+        window.youtubeReplyLog?.debug(`队列中已有 ${this.replyQueue.length} 条评论在等待处理`);
+      }
+      
+      // 重置处理状态
+      setTimeout(() => {
+        this.isProcessingComments = false;
+        window.youtubeReplyLog?.debug('isProcessingComments 状态已重置');
+      }, 1000);
+      
     } catch (error) {
       console.error('Error processing existing comments:', error);
+      this.isProcessingComments = false;
     }
   }
 
   async processNewComment(commentElement) {
     try {
+      // 更新活动时间
+      this.updateActivity();
+      
+      // 防止重复处理 - 检查是否正在处理中
+      if (this.isProcessingQueue) {
+        window.youtubeReplyLog?.debug('队列正在处理中，跳过新评论');
+        return;
+      }
+      
+      // 检查是否达到回复限制
+      if (this.settings?.maxRepliesPerSession && 
+          this.sessionReplyCount >= this.settings.maxRepliesPerSession) {
+        window.youtubeReplyLog?.debug('已达到回复限制，不处理新评论');
+        return;
+      }
+      
       // Ensure settings are loaded
       if (!this.settings) {
         window.youtubeReplyLog?.debug('设置未加载，正在加载...');
         await this.loadSettings();
+        if (!this.settings) {
+          window.youtubeReplyLog?.error('设置加载失败');
+          return;
+        }
       }
       
       const commentText = this.extractCommentText(commentElement);
-      window.youtubeReplyLog?.processing(`处理评论: ${commentText?.substring(0, 30)}...`);
+      if (!commentText) {
+        return; // 静默跳过空评论
+      }
       
-      window.youtubeReplyLog?.debug('自动回复状态:', { enabled: this.settings?.autoReplyEnabled, hasApiKey: !!this.settings?.apiKey });
+      // 只在调试模式下显示发现评论的日志
+      if (window.youtubeReplyLog?.isDebugMode) {
+        window.youtubeReplyLog?.processing(`发现评论: ${commentText?.substring(0, 30)}...`);
+      }
       
       if (!this.settings?.autoReplyEnabled) {
         window.youtubeReplyLog?.debug('自动回复已禁用');
@@ -313,55 +471,10 @@ class YouTubeCommentMonitor {
         return;
       }
 
-      // Extract comment text was moved up
-      
-      if (!commentText || commentText.trim().length < 10) {
-        window.youtubeReplyLog?.debug('评论太短，跳过');
-        return;
-      }
-
-      // Check if we should skip this comment (short words, etc.)
-      if (this.shouldSkipComment(commentText)) {
-        window.youtubeReplyLog?.debug('跳过简单评论:', commentText.substring(0, 50));
-        return;
-      }
-
-      // Check if this is an emoji-heavy comment
-      if (this.isEmojiHeavy(commentText)) {
-        // console.log('Emoji-heavy comment detected, will use emoji reply');
-        // Don't return here, we'll handle it in the reply generation
-      }
-
-      // Get the position of the comment for better duplicate detection
+      // 所有的评论都应该处理，不跳过任何评论
+      // Get the position of the comment
       const position = this.getElementPosition(commentElement);
       
-      // Check if we've recently processed a comment with the same text at this position
-      const positionKey = Math.floor(position / 100); // Group positions in 100px chunks
-      const textKey = this.simpleHash(commentText.substring(0, 50));
-      const recentKey = `${positionKey}_${textKey}`;
-      const now = Date.now();
-      
-      if (this.lastProcessedTexts.has(recentKey)) {
-        const lastProcessed = this.lastProcessedTexts.get(recentKey);
-        if (now - lastProcessed < 10000) { // 10 second debounce for same text in similar position
-          // console.log('Comment recently processed at this position, skipping');
-          return;
-        }
-      }
-      
-      // Update the last processed time
-      this.lastProcessedTexts.set(recentKey, now);
-      
-      // Clean up old entries (keep only last minute)
-      if (this.lastProcessedTexts.size > 100) {
-        const cutoff = now - 60000;
-        for (const [key, timestamp] of this.lastProcessedTexts.entries()) {
-          if (timestamp < cutoff) {
-            this.lastProcessedTexts.delete(key);
-          }
-        }
-      }
-
       // Get comment ID to avoid duplicates
       const commentId = this.getCommentId(commentElement);
       
@@ -370,39 +483,33 @@ class YouTubeCommentMonitor {
         return;
       }
       
-      // Check if we've already processed this comment
+      // 检查是否已经处理过
       if (this.processedComments.has(commentId)) {
-        // console.log(`Comment ${commentId} already processed, skipping`);
+        window.youtubeReplyLog?.debug(`评论已处理过，跳过: ${commentId}`);
         return;
       }
       
-      // Also check by text content to be extra sure
-      const textHash = this.simpleHash(commentText);
-      if (this.processedComments.has(`text_${textHash}`)) {
-        // console.log(`Comment with same text already processed, skipping`);
-        return;
-      }
-
-      // console.log('New comment detected:', commentText.substring(0, 100) + '...');
+      // 立即标记为已处理，防止重复加入队列
+      this.processedComments.add(commentId);
       
-      // Add to reply queue with position info - but DON'T mark as processed yet
+      // Add to reply queue
       this.replyQueue.push({
         commentId,
         commentText,
         element: commentElement,
         timestamp: Date.now(),
-        textHash,
         position
       });
-
-      // Sort the queue by position (top to bottom)
-      this.replyQueue.sort((a, b) => a.position - b.position);
-
-      // Process reply queue
-      this.processReplyQueue();
+      
+      window.youtubeReplyLog?.info(`评论已加入队列 (队列长度: ${this.replyQueue.length})，位置: ${position}px`);
+      
+      // 如果队列没有在处理中，则开始处理
+      if (!this.isProcessingQueue && this.replyQueue.length > 0) {
+        window.youtubeReplyLog?.debug('开始处理回复队列');
+        this.processReplyQueue();
+      }
     } catch (error) {
       console.error('Error processing new comment:', error);
-      console.error('Comment element:', commentElement);
     }
   }
 
@@ -444,10 +551,21 @@ class YouTubeCommentMonitor {
         }
       }
       
-      // If no stable ID found, use hash of comment text
+      // If no stable ID found, use hash of comment text and timestamp
       const textHash = this.simpleHash(commentText);
-      const uniqueId = `comment_${textHash}`;
-      // console.log('Generated hash-based comment ID:', uniqueId);
+      // Check if we've seen similar content recently
+      const now = Date.now();
+      const timeWindow = Math.floor(now / 300000); // 5-minute windows
+      
+      // Also check for author info to make ID more unique
+      const authorElement = commentElement.querySelector('.author-name, .comment-author, [id="author-text"]') ||
+                           commentElement.closest('.comment-renderer')?.querySelector('.author-name');
+      const authorName = authorElement ? authorElement.textContent.trim().substring(0, 10) : 'unknown';
+      const authorHash = this.simpleHash(authorName);
+      
+      // Create ID that's stable within a time window, including author info
+      const uniqueId = `comment_${textHash}_${authorHash}_${timeWindow}`;
+      window.youtubeReplyLog?.debug(`生成评论ID: ${uniqueId} (基于文本、作者和时间窗口)`);
       return uniqueId;
     } catch (error) {
       console.error('Error getting comment ID:', error);
@@ -466,16 +584,12 @@ class YouTubeCommentMonitor {
   }
   
   getElementPosition(element) {
-    // Get the Y position of the element relative to the document
-    let yPos = 0;
-    let tempElement = element;
+    // Get the Y position of the element relative to the viewport
+    const rect = element.getBoundingClientRect();
+    const scrollY = window.scrollY || document.documentElement.scrollTop;
     
-    while (tempElement) {
-      yPos += tempElement.offsetTop;
-      tempElement = tempElement.offsetParent;
-    }
-    
-    return yPos;
+    // Return position relative to document top
+    return Math.round(rect.top + scrollY);
   }
   
   isOwnReply(text) {
@@ -491,6 +605,57 @@ class YouTubeCommentMonitor {
     ];
     
     return ownReplyPatterns.some(pattern => text.includes(pattern));
+  }
+
+  // 检查是否应该使用预置回复
+  shouldUsePresetReply(commentText) {
+    if (!this.settings?.localReplyRules || !this.settings?.presetReplies || this.settings.presetReplies.length === 0) {
+      return false;
+    }
+
+    const text = commentText.trim();
+    
+    // 检查是否符合本地回复规则
+    return this.settings.localReplyRules.some(rule => {
+      switch(rule) {
+        case '纯表情符号':
+          return /^[\s\S]*?[\p{Emoji_Presentation}\p{Emoji}\u200D]+[\s\S]*?$/u.test(text) && text.length < 10;
+        case '单个字或标点':
+          return text.length <= 2 && /[\u4e00-\u9fa5\w]/.test(text);
+        case '无意义的字符':
+          return /^[a-zA-Z0-9\s\W]*$/.test(text) && text.length < 5;
+        case '英文评论':
+          return /^[a-zA-Z\s\W]+$/.test(text) && text.length > 0;
+        case '数字评论':
+          return /^[0-9]+$/.test(text);
+        case '链接评论':
+          return /http|www\.|\.com|\.cn|\.net/.test(text);
+        case '太短的评论':
+          return text.length < 5;
+        case '太长的评论':
+          return text.length > 100;
+        case '重复内容':
+          return /(.)\1{4,}/.test(text); // 检测连续重复的字符
+        default:
+          // 尝试匹配自定义规则描述中的关键词
+          if (rule.includes('表情')) return /^[\s\S]*?[\p{Emoji_Presentation}\p{Emoji}\u200D]+[\s\S]*?$/u.test(text);
+          if (rule.includes('英文') || rule.includes('English')) return /^[a-zA-Z\s\W]+$/.test(text);
+          if (rule.includes('数字')) return /^[0-9\s]+$/.test(text);
+          if (rule.includes('链接') || rule.includes('http')) return /http|www\.|\.com|\.cn|\.net/.test(text);
+          if (rule.includes('短') || rule.includes('少')) return text.length < 5;
+          if (rule.includes('长') || rule.includes('多')) return text.length > 100;
+          return false;
+      }
+    });
+  }
+
+  // 获取随机预置回复
+  getRandomPresetReply() {
+    const replies = this.settings?.presetReplies;
+    if (!replies || replies.length === 0) {
+      return '感谢你的评论！💖'; // 默认回复
+    }
+    return replies[Math.floor(Math.random() * replies.length)];
   }
 
   isEmojiHeavy(text) {
@@ -537,12 +702,14 @@ class YouTubeCommentMonitor {
     
     // Skip if text is less than 4 characters (after trimming)
     if (trimmedText.length < 4) {
+      window.youtubeReplyLog?.debug(`跳过评论: 长度小于4个字符 - "${text}"`);
       return true;
     }
     
     // Check against skip patterns
     for (const pattern of skipPatterns) {
       if (pattern.test(trimmedText)) {
+        window.youtubeReplyLog?.debug(`跳过评论: 匹配跳过规则 - "${text}"`);
         return true;
       }
     }
@@ -646,49 +813,92 @@ class YouTubeCommentMonitor {
   }
 
   async processReplyQueue() {
-    if (this.isProcessing || this.replyQueue.length === 0) {
+    window.youtubeReplyLog?.debug(`processReplyQueue 被调用，队列长度: ${this.replyQueue.length}，处理状态: ${this.isProcessingQueue}`);
+    
+    if (this.isProcessingQueue || this.replyQueue.length === 0) {
+      window.youtubeReplyLog?.debug(`队列处理被跳过 - 正在处理: ${this.isProcessingQueue}，队列空: ${this.replyQueue.length === 0}`);
       return;
     }
 
-    this.isProcessing = true;
+    this.isProcessingQueue = true;
+    
+    // 停止自动滚动，避免干扰回复过程
+    this.stopAutoScroll();
 
-
-    while (this.replyQueue.length > 0) {
-      const comment = this.replyQueue.shift();
-
+    try {
+      // 按位置排序，确保从上到下处理
+      this.replyQueue.sort((a, b) => a.position - b.position);
       
-      // Double check if this comment has already been processed
-      if (this.processedComments.has(comment.commentId) || 
-          this.processedComments.has(`text_${comment.textHash}`)) {
-
-        continue;
+      const totalInQueue = this.replyQueue.length;
+      window.youtubeReplyLog?.info(`开始处理队列，共 ${totalInQueue} 条评论`);
+      
+      // 显示队列中的所有评论
+      window.youtubeReplyLog?.debug('队列中的评论列表:');
+      this.replyQueue.forEach((comment, index) => {
+        window.youtubeReplyLog?.debug(`  ${index + 1}. 位置: ${comment.position}px, 内容: ${comment.commentText.substring(0, 30)}...`);
+      });
+      
+      let processedCount = 0;
+      while (this.replyQueue.length > 0) {
+        const comment = this.replyQueue.shift();
+        processedCount++;
+        
+        window.youtubeReplyLog?.info(`处理第 ${processedCount}/${totalInQueue} 条评论`);
+        window.youtubeReplyLog?.debug(`当前处理: 位置 ${comment.position}px, 内容: ${comment.commentText.substring(0, 30)}...`);
+        
+        // 再次检查是否应该回复
+        if (await this.shouldReplyToComment(comment)) {
+          try {
+            await this.generateAndPostReply(comment);
+            
+            // 处理完成后，向下滚动以查看下一条评论
+            if (this.replyQueue.length > 0) {
+              await this.scrollDownAfterReply();
+            }
+            
+          } catch (error) {
+            console.error('Error processing comment:', error);
+            window.youtubeReplyLog?.error(`处理评论时出错: ${error.message}`);
+          }
+        } else {
+          window.youtubeReplyLog?.debug(`跳过评论: ${comment.commentText.substring(0, 30)}`);
+        }
+        
+        // 添加延迟，避免操作过快
+        await this.sleep(this.settings?.replyDelay || 3000);
+        
+        // 检查是否达到回复限制
+        if (this.settings?.maxRepliesPerSession && 
+            this.sessionReplyCount >= this.settings.maxRepliesPerSession) {
+          window.youtubeReplyLog?.status(`已达到回复限制 (${this.settings.maxRepliesPerSession} 条)，停止处理`);
+          break;
+        }
       }
       
-      // Mark as processed NOW - before we start replying
-      this.processedComments.add(comment.commentId);
-      this.processedComments.add(`text_${comment.textHash}`);
+      window.youtubeReplyLog?.success(`队列处理完成，共处理 ${processedCount} 条评论`);
       
-      // Check if we should reply to this comment
-      if (await this.shouldReplyToComment(comment)) {
-        await this.generateAndPostReply(comment);
-      } else {
-
+    } finally {
+      this.isProcessingQueue = false;
+      
+      // 队列处理完成后，检查是否还有未加载的评论
+      if (this.settings?.autoReplyEnabled && 
+          this.sessionReplyCount < (this.settings?.maxRepliesPerSession || 10)) {
+        // 延迟后重新开始自动滚动以加载更多评论
+        setTimeout(() => {
+          if (!this.isProcessingQueue && !this.isScrolling) {
+            this.startAutoScroll();
+          }
+        }, 3000);
       }
-
-      // Add delay between replies
-      await this.sleep(this.settings?.replyDelay || 3000);
     }
-
-    this.isProcessing = false;
-
   }
 
   async shouldReplyToComment(comment) {
-
+    window.youtubeReplyLog?.debug('检查是否应该回复评论...');
     
     // Check if auto-reply is enabled
     if (!this.settings?.autoReplyEnabled) {
-
+      window.youtubeReplyLog?.debug('自动回复已禁用，跳过回复');
       this.stopAutoScroll();
       return false;
     }
@@ -702,21 +912,8 @@ class YouTubeCommentMonitor {
       }
     }
 
-    // Avoid replying to very short comments
-    if (comment.commentText.length < 10) {
-
-      return false;
-    }
-
-    // Avoid replying to comments that might be spam
-    const spamKeywords = ['subscribe', 'like', 'check out', 'visit my', 'my channel'];
-    const lowerComment = comment.commentText.toLowerCase();
-    if (spamKeywords.some(keyword => lowerComment.includes(keyword))) {
-
-      return false;
-    }
-
-
+    // 所有评论都应该回复，使用本地回复规则判断是否使用预置回复
+    window.youtubeReplyLog?.debug(`评论准备回复: ${comment.commentText.substring(0, 30)}...`);
     return true;
   }
 
@@ -753,6 +950,9 @@ class YouTubeCommentMonitor {
 
   async generateAndPostReply(comment) {
     try {
+      // 更新活动时间
+      this.updateActivity();
+      
       // 获取当前回复编号（使用会话计数器）
       const replyNumber = this.sessionReplyCount + 1;
       
@@ -767,23 +967,47 @@ class YouTubeCommentMonitor {
 
       let replyText;
       let aiResponse = null;
+      let usePresetReply = false;
       
-      // Check if this is an emoji-heavy comment and use emoji reply
-      if (this.isEmojiHeavy(comment.commentText)) {
+      // 首先检查是否应该使用预置回复（基于本地回复规则）
+      if (this.settings?.localReplyRules && this.settings?.presetReplies) {
+        usePresetReply = this.shouldUsePresetReply(comment.commentText);
+        if (usePresetReply) {
+          replyText = this.getRandomPresetReply();
+          window.youtubeReplyLog?.info('📋 使用预置回复:', replyText);
+        }
+      }
+      
+      // 如果不使用预置回复，检查是否是表情符号评论
+      if (!replyText && this.isEmojiHeavy(comment.commentText)) {
         replyText = this.generateEmojiReply();
         window.youtubeReplyLog?.info('😊 使用表情回复:', replyText);
         // emoji回复不执行点赞操作
-      } else {
+      } else if (!replyText) {
         // Generate AI reply for regular comments
         window.youtubeReplyLog?.debug('🤖 请求AI生成回复...');
-        const response = await chrome.runtime.sendMessage({
-          action: 'generateReply',
-          commentText: comment.commentText,
-          replyStyle: this.settings?.replyStyle || 'friendly'
-        });
-
-        if (!response.success) {
-          throw new Error(response.error);
+        let response;
+        try {
+          response = await chrome.runtime.sendMessage({
+            action: 'generateReply',
+            commentText: comment.commentText,
+            replyStyle: this.settings?.replyStyle || 'friendly'
+          });
+          
+          // 检查响应是否存在
+          if (!response) {
+            throw new Error('未收到API响应');
+          }
+          
+          if (!response.success) {
+            throw new Error(response.error || 'API请求失败');
+          }
+        } catch (error) {
+          // 如果是消息传递错误，添加更详细的错误信息
+          if (error.message.includes('message channel closed')) {
+            throw new Error('API响应超时，请重试');
+          }
+          throw error;
         }
 
         // 保存AI响应信息用于后续操作
@@ -1243,156 +1467,136 @@ class YouTubeCommentMonitor {
   }
 
   async startAutoScroll() {
-
-    
-    // Check if we're already scrolling
+    // 检查是否已经在滚动中
     if (this.isScrolling) {
+      window.youtubeReplyLog?.debug('自动滚动已在运行中，跳过启动');
+      return;
+    }
+    
+    // 只有在自动回复启用且未达到限制时才启动自动滚动
+    if (!this.settings?.autoReplyEnabled) {
+      return;
+    }
+    
+    if (this.settings?.maxRepliesPerSession && 
+        this.sessionReplyCount >= this.settings.maxRepliesPerSession) {
       return;
     }
     
     this.isScrolling = true;
-    // Set lastScrollTime to 0 to allow immediate first scroll
     this.lastScrollTime = 0;
+    
+    // 使用更长的间隔，减少干扰
     this.scrollCheckInterval = setInterval(() => {
       this.checkAndScroll();
-    }, 3000); // Check every 3 seconds
+    }, 5000); // 每5秒检查一次
     
-    // Also trigger an immediate scroll check after a short delay
+    // 延迟后首次检查
     setTimeout(() => {
       this.checkAndScroll();
-    }, 1000);
+    }, 2000);
   }
 
   checkAndScroll() {
     try {
-
-      
-      // Don't scroll if we're currently processing replies
-      if (this.isProcessing) {
-
+      // 不要在处理评论时滚动
+      if (this.isProcessingQueue || this.isProcessingComments) {
         return;
       }
       
-      // Check if we've reached the reply limit
-      if (this.settings?.maxRepliesPerSession) {
-        const today = new Date().toDateString();
-        // We can't easily get the current count without async, so we'll just check the setting
-        // The scrolling will be stopped when limit is reached in shouldReplyToComment
+      // 检查是否达到回复限制
+      if (this.settings?.maxRepliesPerSession && 
+          this.sessionReplyCount >= this.settings.maxRepliesPerSession) {
+        this.stopAutoScroll();
+        window.youtubeReplyLog?.status('⏹️ 已达到回复限制，停止自动滚动');
+        return;
       }
-
+      
       const now = Date.now();
-      // Only scroll if it's been at least 5 seconds since the last scroll
-      if (now - this.lastScrollTime < 5000) {
-
+      // 至少间隔15秒才滚动一次
+      if (now - this.lastScrollTime < 15000) {
         return;
       }
       
-
+      // 首先查找"加载更多"按钮
+      const loadMoreButton = document.querySelector(
+        'ytcp-button[aria-label*="Load more"], ' +
+        'ytcp-button[aria-label*="加载更多"], ' +
+        'ytcp-button[aria-label*="更多"], ' +
+        'button[aria-label*="Load more"], ' +
+        'button[aria-label*="加载更多"]'
+      );
       
-      // Track if we've scrolled before to detect new content
-      if (this.lastScrollHeight && this.activitySection) {
-        const currentHeight = this.activitySection.scrollHeight;
-        if (currentHeight > this.lastScrollHeight) {
-
-          // Reset scroll position to continue scrolling
-          this.lastScrollHeight = currentHeight;
-        }
-      }
-
-      // Check if we need to scroll (look for various load more buttons)
-      const loadMoreButton = document.querySelector('ytcp-button[aria-label*="Load more"], button[aria-label*="Load more"], ytcp-button[aria-label*="加载更多"], ytcp-button[aria-label*="更多"], button[aria-label*="更多"]');
-      
-      if (loadMoreButton) {
-
+      if (loadMoreButton && loadMoreButton.offsetParent !== null) {
+        window.youtubeReplyLog?.debug('点击加载更多按钮');
         loadMoreButton.click();
         this.lastScrollTime = now;
         return;
       }
-
-      // Try to find and click any "Show more replies" buttons
-      const showMoreButtons = document.querySelectorAll('ytcp-button[aria-label*="Show more replies"], button[aria-label*="Show more replies"], ytcp-button[aria-label*="显示更多回复"], ytcp-button[aria-label*="更多回复"]');
-      if (showMoreButtons.length > 0) {
-
-        showMoreButtons.forEach(button => {
-          if (!button.clicked) {
-            button.click();
-            button.clicked = true;
-
-          }
-        });
-        this.lastScrollTime = now;
-        return;
-      }
-
-      // Check if we're at the bottom - prioritize YTCP-ACTIVITY-SECTION container
-      let scrollContainer = null;
-      let scrollTop = 0;
-      let scrollHeight = 0;
-      let clientHeight = 0;
       
-      // First try YTCP-ACTIVITY-SECTION (YouTube Studio's main scroll container)
-      const activitySection = document.querySelector('ytcp-activity-section');
-      if (activitySection && activitySection.scrollHeight > activitySection.clientHeight) {
-        scrollContainer = activitySection;
-        scrollTop = activitySection.scrollTop;
-        scrollHeight = activitySection.scrollHeight;
-        clientHeight = activitySection.clientHeight;
-        this.activitySection = activitySection;
-
-      } else {
-        // Fallback to other containers
-        const containers = [
-          document.querySelector('#primary-inner'),
-          document.querySelector('#primary'),
-          document.querySelector('#comments'),
-          document.querySelector('ytd-comments'),
-          document.querySelector('.ytcp-app'),
-          document.querySelector('body'),
-          document.documentElement
-        ];
-        
-        // Debug: log all potential containers
-        
-        for (const container of containers) {
-          if (container && container.scrollHeight > container.clientHeight) {
-            scrollContainer = container;
-            scrollTop = container.scrollTop;
-            scrollHeight = container.scrollHeight;
-            clientHeight = container.clientHeight;
-            break;
-          }
-        }
-      }
-      
-      // If no scrollable container found, use window
+      // 检查是否需要滚动以加载更多评论
+      const scrollContainer = this.findScrollContainer();
       if (!scrollContainer) {
-        scrollTop = window.scrollY;
-        scrollHeight = document.documentElement.scrollHeight;
-        clientHeight = window.innerHeight;
-        scrollContainer = window;
-
-      }
-      
-      // If we're near the bottom or if we haven't scrolled much, scroll down
-      const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
-
-      
-      if (distanceFromBottom < 1500 || scrollTop < 500) {
-        if (scrollContainer === window) {
-          window.scrollBy(0, 1000);
-        } else {
-          scrollContainer.scrollTop += 1000;
-        }
-        this.lastScrollTime = now;
-        this.lastScrollHeight = scrollHeight;
-
         return;
       }
       
-
+      const scrollTop = scrollContainer.scrollTop || window.scrollY;
+      const scrollHeight = scrollContainer.scrollHeight || document.documentElement.scrollHeight;
+      const clientHeight = scrollContainer.clientHeight || window.innerHeight;
+      
+      const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
+      
+      // 如果距离底部超过1000px，则向下滚动
+      if (distanceFromBottom > 1000) {
+        const scrollAmount = Math.min(600, distanceFromBottom / 2);
+        
+        if (scrollContainer === window) {
+          window.scrollTo({
+            top: scrollTop + scrollAmount,
+            behavior: 'smooth'
+          });
+        } else {
+          scrollContainer.scrollTo({
+            top: scrollTop + scrollAmount,
+            behavior: 'smooth'
+          });
+        }
+        
+        this.lastScrollTime = now;
+        window.youtubeReplyLog?.debug(`自动向下滚动 ${scrollAmount}px，距离底部 ${distanceFromBottom}px`);
+        
+        // 滚动后检查新评论（仅在不在处理队列时）
+        setTimeout(() => {
+          if (!this.isProcessingQueue) {
+            this.processExistingComments();
+          }
+        }, 2000);
+      } else {
+        window.youtubeReplyLog?.debug(`已接近底部，距离底部 ${distanceFromBottom}px`);
+      }
+      
     } catch (error) {
       console.error('Error in auto-scroll:', error);
     }
+  }
+  
+  findScrollContainer() {
+    // 查找主要的滚动容器
+    const containers = [
+      document.querySelector('ytcp-activity-section'),
+      document.querySelector('#primary-inner'),
+      document.querySelector('#primary'),
+      document.querySelector('#comments'),
+      document.querySelector('.ytcp-app')
+    ].filter(Boolean);
+    
+    for (const container of containers) {
+      if (container && container.scrollHeight > container.clientHeight) {
+        return container;
+      }
+    }
+    
+    return window;
   }
 
   stopAutoScroll() {
@@ -1410,9 +1614,7 @@ class YouTubeCommentMonitor {
 
   // Setup scroll detection to understand YouTube Studio scrolling
   setupScrollDetection() {
-
-    
-    // Monitor scroll events with capture phase
+    // 监听滚动事件以检测新评论
     const scrollTargets = [
       window,
       document,
@@ -1426,76 +1628,97 @@ class YouTubeCommentMonitor {
       document.querySelector('ytd-app')
     ].filter(Boolean);
     
-
-    
     scrollTargets.forEach(target => {
       if (!target) return;
       
-      // Use capture phase and passive: false
       target.addEventListener('scroll', (event) => {
-        // Check for new comments after scroll
-        setTimeout(() => {
+        // 防抖处理
+        clearTimeout(this.scrollTimeout);
+        this.scrollTimeout = setTimeout(() => {
           this.checkForNewCommentsAfterScroll();
-        }, 1000);
-      }, { capture: true, passive: false });
+        }, 500);
+      }, { capture: true, passive: true });
     });
-    
-    // Also monitor wheel events
-    document.addEventListener('wheel', (event) => {
-      // Wheel event detected
-    }, { capture: true, passive: false });
-    
-    // Also monitor touch events for mobile
-    document.addEventListener('touchmove', (event) => {
-      // Touch move event detected
-    }, { capture: true, passive: false });
-    
-    // Monitor scroll on the whole document with timeout
-    let lastScrollTop = window.scrollY;
-    setInterval(() => {
-      const currentScrollTop = window.scrollY;
-      if (currentScrollTop !== lastScrollTop) {
-        lastScrollTop = currentScrollTop;
-        this.checkForNewCommentsAfterScroll();
-      }
-    }, 100);
   }
   
   checkForNewCommentsAfterScroll() {
-    // Check document dimensions
-    const existingComments = document.querySelectorAll('ytd-comment-thread-renderer #content-text, ytd-comment-renderer #content-text, ytcp-comment #content-text, #content-text.yt-core-attributed-string');
-    
-    // Check all visible buttons
-    const allButtons = document.querySelectorAll('button, ytcp-button');
-    const loadMoreButtons = Array.from(allButtons).filter(btn => {
-      const label = btn.getAttribute('aria-label') || btn.textContent || '';
-      return label.toLowerCase().includes('load more') || 
-             label.toLowerCase().includes('加载更多') || 
-             label.toLowerCase().includes('更多');
-    });
-    
-    const showMoreButtons = Array.from(allButtons).filter(btn => {
-      const label = btn.getAttribute('aria-label') || btn.textContent || '';
-      return label.toLowerCase().includes('show more') || 
-             label.toLowerCase().includes('显示更多') || 
-             label.toLowerCase().includes('更多回复');
-    });
-    
-    // All buttons found: allButtons.length
-
-
-    
-    // Check if there are any elements with 'loading' text
-    const loadingElements = document.querySelectorAll('*');
-    const loadingTexts = Array.from(loadingElements).filter(el => {
-      const text = el.textContent || '';
-      return text.toLowerCase().includes('loading') || 
-             text.toLowerCase().includes('加载') || 
-             text.toLowerCase().includes('加载中');
-    });
-    
-    if (loadingTexts.length > 0) {
-      // Loading elements found
+    // 简化版本，只在需要时处理
+    if (!this.isProcessingQueue) {
+      this.processExistingComments();
+    }
+  }
+  
+  async checkAndScrollIfNeeded() {
+    try {
+      // 这个方法现在由 scrollDownAfterReply 替代
+      return;
+    } catch (error) {
+      console.error('Error in checkAndScrollIfNeeded:', error);
+    }
+  }
+  
+  async loadMoreComments() {
+    try {
+      window.youtubeReplyLog?.info('检查是否可以加载更多评论...');
+      
+      // 查找"加载更多"按钮
+      const loadMoreButtons = document.querySelectorAll(
+        'ytcp-button[aria-label*="Load more"], ' +
+        'ytcp-button[aria-label*="加载更多"], ' +
+        'ytcp-button[aria-label*="更多"], ' +
+        'button[aria-label*="Load more"], ' +
+        'button[aria-label*="加载更多"]'
+      );
+      
+      if (loadMoreButtons.length > 0) {
+        window.youtubeReplyLog?.info(`找到 ${loadMoreButtons.length} 个加载更多按钮`);
+        
+        for (const button of loadMoreButtons) {
+          if (button.offsetParent !== null) { // 确保按钮可见
+            window.youtubeReplyLog?.debug('点击加载更多按钮');
+            button.click();
+            await this.sleep(3000); // 等待新评论加载
+            
+            // 检查新加载的评论
+            await this.processExistingComments();
+            break;
+          }
+        }
+      } else {
+        // 如果没有加载更多按钮，尝试滚动到底部
+        const scrollContainer = this.findScrollContainer();
+        if (scrollContainer) {
+          const scrollHeight = scrollContainer.scrollHeight || document.documentElement.scrollHeight;
+          const clientHeight = scrollContainer.clientHeight || window.innerHeight;
+          const scrollTop = scrollContainer.scrollTop || window.scrollY;
+          
+          // 如果距离底部还有空间，向下滚动
+          if (scrollTop + clientHeight < scrollHeight - 100) {
+            window.youtubeReplyLog?.debug('向下滚动以加载更多评论...');
+            
+            if (scrollContainer === window) {
+              window.scrollTo({
+                top: scrollTop + 800,
+                behavior: 'smooth'
+              });
+            } else {
+              scrollContainer.scrollTo({
+                top: scrollTop + 800,
+                behavior: 'smooth'
+              });
+            }
+            
+            await this.sleep(3000);
+            
+            // 再次检查评论
+            await this.processExistingComments();
+          } else {
+            window.youtubeReplyLog?.info('已到达页面底部，没有更多评论可加载');
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error in loadMoreComments:', error);
     }
   }
 }
@@ -1556,6 +1779,282 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else {
       sendResponse({ success: false, error: 'Log window not available' });
     }
+  }
+});
+
+// 在类的最后添加新方法
+YouTubeCommentMonitor.prototype.setupActivityMonitoring = function() {
+  // 监控活动状态，如果长时间没有活动则停止自动回复
+  const checkInactivity = () => {
+    const now = Date.now();
+    const inactiveTime = now - this.lastActivityTime;
+    
+    // 如果5分钟没有活动，停止自动回复
+    if (inactiveTime > 300000 && this.settings?.autoReplyEnabled) {
+      window.youtubeReplyLog?.warning('⚠️ 长时间无活动，自动停止回复');
+      this.stopAutoReply();
+    }
+  };
+  
+  // 每分钟检查一次
+  setInterval(checkInactivity, 60000);
+};
+
+YouTubeCommentMonitor.prototype.updateActivity = function() {
+  this.lastActivityTime = Date.now();
+};
+
+YouTubeCommentMonitor.prototype.stopAutoReply = function() {
+  // 停止所有自动回复活动
+  this.stopAutoScroll();
+  this.isProcessingQueue = false;
+  this.replyQueue = [];
+  
+  // 更新设置
+  if (this.settings) {
+    this.settings.autoReplyEnabled = false;
+    chrome.storage.sync.set({ settings: this.settings }, () => {
+      window.youtubeReplyLog?.status('⏸️ 自动回复已停止');
+    });
+  }
+};
+
+
+YouTubeCommentMonitor.prototype.scrollDownAfterReply = async function() {
+  try {
+    // 等待一下确保回复已经完全提交
+    await this.sleep(1000);
+    
+    // 获取当前滚动位置
+    const currentScroll = window.scrollY || document.documentElement.scrollTop;
+    const targetScroll = currentScroll + 230;
+    
+    window.youtubeReplyLog?.debug(`向下滚动 230px (从 ${currentScroll} 到 ${targetScroll})`);
+    
+    // 查找YouTube Studio的滚动容器
+    const containers = [
+      document.querySelector('ytcp-activity-section'),
+      document.querySelector('#primary-inner'),
+      document.querySelector('#primary'),
+      document.querySelector('.ytcp-app')
+    ].filter(Boolean);
+    
+    let scrollContainer = null;
+    for (const container of containers) {
+      if (container && container.scrollHeight > container.clientHeight) {
+        scrollContainer = container;
+        window.youtubeReplyLog?.debug(`找到滚动容器: ${container.tagName.toLowerCase()}`);
+        break;
+      }
+    }
+    
+    // 如果没有找到容器，使用window
+    if (!scrollContainer) {
+      scrollContainer = window;
+      window.youtubeReplyLog?.debug('使用window作为滚动容器');
+    }
+    
+    // 尝试多种滚动方法
+    let scrollSuccess = false;
+    
+    // 方法1：直接设置scrollTop
+    try {
+      if (scrollContainer === window) {
+        window.scrollTo(0, targetScroll);
+      } else {
+        scrollContainer.scrollTop = targetScroll;
+      }
+      
+      // 等待一下
+      await this.sleep(100);
+      
+      // 验证
+      const actualScroll = scrollContainer === window ? 
+        (window.scrollY || document.documentElement.scrollTop) : 
+        scrollContainer.scrollTop;
+      
+      if (Math.abs(actualScroll - targetScroll) < 50) {
+        scrollSuccess = true;
+        window.youtubeReplyLog?.debug('方法1成功: 直接设置scrollTop');
+      }
+    } catch (e) {
+      window.youtubeReplyLog?.debug(`方法1失败: ${e.message}`);
+    }
+    
+    // 方法2：使用scrollTo
+    if (!scrollSuccess) {
+      try {
+        if (scrollContainer === window) {
+          window.scrollTo({ top: targetScroll, behavior: 'auto' });
+        } else {
+          scrollContainer.scrollTo({ top: targetScroll, behavior: 'auto' });
+        }
+        
+        await this.sleep(100);
+        
+        const actualScroll = scrollContainer === window ? 
+          (window.scrollY || document.documentElement.scrollTop) : 
+          scrollContainer.scrollTop;
+        
+        if (Math.abs(actualScroll - targetScroll) < 50) {
+          scrollSuccess = true;
+          window.youtubeReplyLog?.debug('方法2成功: scrollTo');
+        }
+      } catch (e) {
+        window.youtubeReplyLog?.debug(`方法2失败: ${e.message}`);
+      }
+    }
+    
+    // 方法3：模拟键盘PageDown键
+    if (!scrollSuccess) {
+      try {
+        // 创建PageDown按键事件
+        const pageDownEvent = new KeyboardEvent('keydown', {
+          key: 'PageDown',
+          code: 'PageDown',
+          keyCode: 34,
+          which: 34,
+          bubbles: true,
+          cancelable: true
+        });
+        
+        document.dispatchEvent(pageDownEvent);
+        await this.sleep(200);
+        
+        const actualScroll = scrollContainer === window ? 
+          (window.scrollY || document.documentElement.scrollTop) : 
+          scrollContainer.scrollTop;
+        
+        if (actualScroll > currentScroll + 100) {
+          scrollSuccess = true;
+          window.youtubeReplyLog?.debug('方法3成功: 模拟PageDown键');
+        }
+      } catch (e) {
+        window.youtubeReplyLog?.debug(`方法3失败: ${e.message}`);
+      }
+    }
+    
+    // 方法4：模拟空格键（某些页面会响应空格键滚动）
+    if (!scrollSuccess) {
+      try {
+        const spaceEvent = new KeyboardEvent('keydown', {
+          key: ' ',
+          code: 'Space',
+          keyCode: 32,
+          which: 32,
+          bubbles: true,
+          cancelable: true
+        });
+        
+        document.dispatchEvent(spaceEvent);
+        await this.sleep(200);
+        
+        const actualScroll = scrollContainer === window ? 
+          (window.scrollY || document.documentElement.scrollTop) : 
+          scrollContainer.scrollTop;
+        
+        if (actualScroll > currentScroll + 100) {
+          scrollSuccess = true;
+          window.youtubeReplyLog?.debug('方法4成功: 模拟空格键');
+        }
+      } catch (e) {
+        window.youtubeReplyLog?.debug(`方法4失败: ${e.message}`);
+      }
+    }
+    
+    // 方法5：使用CSS transform临时移动内容
+    if (!scrollSuccess) {
+      try {
+        window.youtubeReplyLog?.debug('尝试使用CSS transform方法...');
+        
+        // 查找主内容区域
+        const mainContent = document.querySelector('ytcp-activity-section') || 
+                           document.querySelector('#primary-inner') ||
+                           document.querySelector('#primary');
+        
+        if (mainContent) {
+          // 记录原始transform
+          const originalTransform = mainContent.style.transform || '';
+          
+          // 应用向上移动的transform
+          mainContent.style.transform = `translateY(-230px)`;
+          mainContent.style.transition = 'transform 0.3s ease';
+          
+          await this.sleep(300);
+          
+          // 恢复原始transform，同时设置实际的scrollTop
+          mainContent.style.transition = '';
+          mainContent.style.transform = originalTransform;
+          
+          if (scrollContainer === window) {
+            window.scrollTo(0, currentScroll + 230);
+          } else {
+            scrollContainer.scrollTop = currentScroll + 230;
+          }
+          
+          await this.sleep(100);
+          
+          const actualScroll = scrollContainer === window ? 
+            (window.scrollY || document.documentElement.scrollTop) : 
+            scrollContainer.scrollTop;
+          
+          if (actualScroll > currentScroll + 200) {
+            scrollSuccess = true;
+            window.youtubeReplyLog?.debug('方法5成功: CSS transform');
+          }
+        }
+      } catch (e) {
+        window.youtubeReplyLog?.debug(`方法5失败: ${e.message}`);
+      }
+    }
+    
+    // 验证最终结果
+    const finalScroll = scrollContainer === window ? 
+      (window.scrollY || document.documentElement.scrollTop) : 
+      scrollContainer.scrollTop;
+    const scrollDiff = finalScroll - currentScroll;
+    
+    window.youtubeReplyLog?.debug(`最终滚动距离: ${scrollDiff}px`);
+    
+    if (!scrollSuccess) {
+      window.youtubeReplyLog?.warning('⚠️ 所有滚动方法都失败了，页面可能阻止了程序化滚动');
+    }
+    
+  } catch (error) {
+    console.error('Error scrolling down after reply:', error);
+  }
+};
+
+// 添加清理方法
+YouTubeCommentMonitor.prototype.cleanup = function() {
+  // 清理所有定时器和观察者
+  if (this.observer) {
+    this.observer.disconnect();
+    this.observer = null;
+  }
+  
+  if (this.scrollCheckInterval) {
+    clearInterval(this.scrollCheckInterval);
+    this.scrollCheckInterval = null;
+  }
+  
+  if (this.commentCheckInterval) {
+    clearInterval(this.commentCheckInterval);
+    this.commentCheckInterval = null;
+  }
+  
+  this.stopAutoScroll();
+  this.isProcessingQueue = false;
+  this.isProcessingComments = false;
+  this.replyQueue = [];
+  
+  window.youtubeReplyLog?.info('清理完成');
+};
+
+// 页面卸载时清理
+window.addEventListener('beforeunload', () => {
+  if (window.youtubeCommentMonitor) {
+    window.youtubeCommentMonitor.cleanup();
   }
 });
 
