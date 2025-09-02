@@ -657,7 +657,7 @@ class YouTubeCommentMonitor {
       const replyCount = await this.getTodayReplyCount();
 
       if (replyCount >= this.settings.maxRepliesPerSession) {
-
+        window.youtubeReplyLog?.status('⛔ 已达到今日回复上限，停止自动回复');
         this.stopAutoScroll();
         return false;
       }
@@ -697,28 +697,44 @@ class YouTubeCommentMonitor {
       chrome.storage.local.get(['replyCount'], (result) => {
         const countData = result.replyCount || {};
         countData[today] = (countData[today] || 0) + 1;
-        chrome.storage.local.set({ replyCount: countData }, resolve);
+        chrome.storage.local.set({ replyCount: countData }, () => {
+          // 更新显示
+          if (window.youtubeReplyLog && this.settings) {
+            window.youtubeReplyLog.updateReplyCount(countData[today], this.settings.maxRepliesPerSession || 10);
+          }
+          resolve();
+        });
       });
     });
   }
 
   async generateAndPostReply(comment) {
     try {
-      window.youtubeReplyLog?.info('正在生成回复...');
-      window.youtubeReplyLog?.debug('评论内容:', comment.commentText.substring(0, 50));
+      // 获取当前回复编号
+      const currentCount = await this.getTodayReplyCount();
+      const replyNumber = currentCount + 1;
+      const maxReplies = this.settings?.maxRepliesPerSession || 10;
+      
+      // 更新回复编号显示
+      if (window.youtubeReplyLog) {
+        window.youtubeReplyLog.setCurrentReplyNumber(replyNumber);
+        window.youtubeReplyLog.step(`📝 正在回复第 ${replyNumber}/${maxReplies} 条评论`);
+      }
+      
+      window.youtubeReplyLog?.processing('💭 正在生成回复内容...');
+      window.youtubeReplyLog?.debug(`📄 原评论: ${comment.commentText.substring(0, 50)}...`);
 
       let replyText;
-      
-      let aiResponse = null; // 用于存储AI响应，初始为null
+      let aiResponse = null;
       
       // Check if this is an emoji-heavy comment and use emoji reply
       if (this.isEmojiHeavy(comment.commentText)) {
         replyText = this.generateEmojiReply();
-        window.youtubeReplyLog?.info('生成表情回复:', replyText);
+        window.youtubeReplyLog?.info('😊 使用表情回复:', replyText);
         // emoji回复不执行点赞操作
       } else {
         // Generate AI reply for regular comments
-        window.youtubeReplyLog?.debug('请求AI生成回复...');
+        window.youtubeReplyLog?.debug('🤖 请求AI生成回复...');
         const response = await chrome.runtime.sendMessage({
           action: 'generateReply',
           commentText: comment.commentText,
@@ -738,37 +754,47 @@ class YouTubeCommentMonitor {
           replyText = aiResponse.reply;
           const actions = aiResponse.actions || [];
           
-          window.youtubeReplyLog?.success('AI回复已生成:', replyText);
-          window.youtubeReplyLog?.info('评论质量:', aiResponse.quality);
-          window.youtubeReplyLog?.info('执行操作:', actions);
+          window.youtubeReplyLog?.success('✅ AI回复已生成');
+          window.youtubeReplyLog?.info(`💬 回复内容: ${replyText}`);
+          if (aiResponse.quality) {
+            window.youtubeReplyLog?.info(`⭐ 评论质量: ${aiResponse.quality}`);
+          }
+          if (actions.length > 0) {
+            window.youtubeReplyLog?.info(`🎯 执行操作: ${actions.join(', ')}`);
+          }
         } else {
           // 旧格式：直接返回回复文本
           replyText = aiResponse;
-          window.youtubeReplyLog?.success('AI回复已生成:', replyText);
+          window.youtubeReplyLog?.success('✅ AI回复已生成');
+          window.youtubeReplyLog?.info(`💬 回复内容: ${replyText}`);
         }
       }
 
       // Post the reply
+      window.youtubeReplyLog?.step('📤 正在发布回复...');
       await this.postReply(comment.element, replyText);
 
       // 根据AI判断执行点赞和点红心操作
       if (typeof aiResponse === 'object' && aiResponse !== null && aiResponse.actions) {
         const actions = aiResponse.actions;
         if (actions.includes('like')) {
+          window.youtubeReplyLog?.processing('👍 正在点赞...');
           await this.clickLikeButton(comment.element);
         }
         if (actions.includes('heart')) {
+          window.youtubeReplyLog?.processing('❤️ 正在点红心...');
           await this.clickHeartButton(comment.element);
         }
-      } else {
-        // 对于旧格式或非AI回复，不执行点赞和点红心
-        window.youtubeReplyLog?.debug('非AI回复或旧格式，跳过点赞和点红心');
       }
 
-      // Increment reply count
+      // Increment reply count and update display
       await this.incrementReplyCount();
-
-
+      const newCount = await this.getTodayReplyCount();
+      if (window.youtubeReplyLog) {
+        window.youtubeReplyLog.updateReplyCount(newCount, maxReplies);
+      }
+      
+      window.youtubeReplyLog?.success(`🎉 第 ${replyNumber} 条回复完成！`);
 
     } catch (error) {
       console.error('Error generating/posting reply:', error);
@@ -1461,16 +1487,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
   
   if (request.action === 'autoReplyToggled') {
-
     // 更新设置
+    const oldEnabled = commentMonitor.settings.autoReplyEnabled;
     commentMonitor.settings.autoReplyEnabled = request.enabled;
     
-    // 记录日志
-    if (request.enabled) {
-      window.youtubeReplyLog?.info('自动回复已开启');
-      // 如果之前有未处理的评论，可以在这里处理
-    } else {
-      window.youtubeReplyLog?.info('自动回复已关闭');
+    // 只在状态变化时记录日志
+    if (oldEnabled !== request.enabled) {
+      if (request.enabled) {
+        window.youtubeReplyLog?.status('🚀 自动回复已开启');
+        // 如果之前有未处理的评论，可以在这里处理
+      } else {
+        window.youtubeReplyLog?.status('⏸️ 自动回复已关闭');
+      }
     }
     
     sendResponse({ success: true });

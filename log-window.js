@@ -6,6 +6,15 @@ class FloatingLogWindow {
         this.window = null;
         this.logs = [];
         this.isVisible = false;
+        this.isExpanded = false;
+        this.replyCount = 0;
+        this.maxReplies = 10;
+        this.currentReplyNumber = 0;
+        this.lastAutoReplyStatus = null;
+        this.isDragging = false;
+        this.isIndicatorDragging = false;
+        this.dragOffset = { x: 0, y: 0 };
+        this.isPositioned = false;
         this.init();
     }
 
@@ -24,68 +33,258 @@ class FloatingLogWindow {
 
         this.window = document.createElement('div');
         this.window.id = 'youtube-reply-log-window';
-        this.window.innerHTML = `
+        // 创建贴边按钮
+        this.indicator = document.createElement('div');
+        this.indicator.id = 'youtube-reply-log-indicator';
+        this.indicator.innerHTML = `
+            <div class="log-icon">📋</div>
+            <div class="log-stats">
+                <span class="reply-count">0/10</span>
+            </div>
+            <div class="drag-handle">⋮⋮</div>
+        `;
+        
+        // 创建日志面板
+        this.panel = document.createElement('div');
+        this.panel.id = 'youtube-reply-log-panel';
+        this.panel.innerHTML = `
             <div id="youtube-reply-log-header">
                 <span>YouTube AI Reply 日志</span>
-                <button id="youtube-reply-log-clear">清空</button>
-                <button id="youtube-reply-log-close">×</button>
+                <div class="header-controls">
+                    <button id="youtube-reply-log-clear">清空</button>
+                    <button id="youtube-reply-log-close">×</button>
+                </div>
             </div>
             <div id="youtube-reply-log-content"></div>
         `;
+        
+        this.window.appendChild(this.indicator);
+        this.window.appendChild(this.panel);
 
         // Add styles
         const style = document.createElement('style');
         style.textContent = `
             #youtube-reply-log-window {
                 position: fixed;
-                top: 20px;
-                right: 20px;
+                top: 120px;
+                right: 0;
+                z-index: 999999;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            }
+            
+            #youtube-reply-log-indicator {
+                width: 60px;
+                height: 65px;
+                background: #4285f4;
+                border-radius: 30px 0 0 30px;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                transition: all 0.3s ease;
+                box-shadow: -2px 2px 8px rgba(0,0,0,0.2);
+                position: relative;
+                overflow: visible;
+            }
+            
+            #youtube-reply-log-indicator:hover {
+                width: 70px;
+                box-shadow: -4px 4px 12px rgba(0,0,0,0.3);
+            }
+            
+            .log-icon {
+                font-size: 20px;
+                margin-bottom: 2px;
+            }
+            
+            .log-stats {
+                color: white;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            
+            .reply-count {
+                background: rgba(255,255,255,0.2);
+                padding: 2px 6px;
+                border-radius: 10px;
+            }
+            
+            .drag-handle {
+                position: absolute;
+                bottom: -3px;
+                left: 50%;
+                transform: translateX(-50%);
+                color: rgba(255,255,255,0.7);
+                font-size: 10px;
+                cursor: ns-resize;
+                padding: 3px 6px;
+                border-radius: 8px;
+                transition: all 0.2s ease;
+                background: rgba(0,0,0,0.3);
+                line-height: 0.8;
+                letter-spacing: 1px;
+                opacity: 0.6;
+            }
+            
+            .drag-handle:hover {
+                color: rgba(255,255,255,1);
+                background: rgba(0,0,0,0.5);
+                opacity: 1;
+                transform: translateX(-50%) scale(1.1);
+            }
+            
+            #youtube-reply-log-panel {
+                position: absolute;
+                top: 0;
+                right: 60px;
                 width: 400px;
-                height: 300px;
+                height: 400px;
                 background: white;
                 border: 2px solid #4285f4;
-                border-radius: 8px;
-                z-index: 999999;
+                border-radius: 8px 0 0 8px;
                 display: none;
                 flex-direction: column;
-                font-family: monospace;
-                font-size: 12px;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                box-shadow: -4px 4px 16px rgba(0,0,0,0.2);
+                opacity: 0;
+                transform: translateX(20px);
+                transition: all 0.3s ease;
             }
+            
+            #youtube-reply-log-panel.dragging {
+                display: flex !important;
+                opacity: 1 !important;
+                transform: none !important;
+                position: fixed !important;
+                border-radius: 8px !important;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.4) !important;
+            }
+            
+            #youtube-reply-log-panel[style*="left"][style*="top"] {
+                display: flex !important;
+                opacity: 1 !important;
+                transform: none !important;
+                position: fixed !important;
+                border-radius: 8px !important;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.3) !important;
+            }
+            
+            #youtube-reply-log-window:hover #youtube-reply-log-panel:not(.dragging):not([style*="left"]) {
+                display: flex;
+                opacity: 1;
+                transform: translateX(0);
+            }
+            
             #youtube-reply-log-header {
                 background: #4285f4;
                 color: white;
-                padding: 8px;
+                padding: 10px;
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                cursor: move;
                 user-select: none;
+                border-radius: 6px 0 0 0;
+                cursor: move;
             }
+            
+            #youtube-reply-log-panel.dragging #youtube-reply-log-header {
+                border-radius: 6px 6px 0 0;
+            }
+            
+            .header-controls {
+                display: flex;
+                gap: 5px;
+            }
+            
             #youtube-reply-log-content {
                 flex: 1;
                 overflow-y: auto;
-                padding: 8px;
+                padding: 10px;
                 background: #f8f9fa;
+                font-size: 12px;
             }
+            
             .log-entry {
-                margin: 4px 0;
-                padding: 4px;
+                margin: 6px 0;
+                padding: 6px 8px;
                 border-radius: 4px;
+                line-height: 1.4;
+                border-left: 3px solid transparent;
             }
-            .log-info { background: #e3f2fd; color: #1976d2; }
-            .log-success { background: #e8f5e9; color: #388e3c; }
-            .log-warning { background: #fff3e0; color: #f57c00; }
-            .log-error { background: #ffebee; color: #d32f2f; }
-            .log-debug { background: #f3e5f5; color: #7b1fa2; }
-            .log-processing { background: #e0f2f1; color: #00796b; }
+            
+            .log-info { 
+                background: #e3f2fd; 
+                color: #1976d2; 
+                border-left-color: #1976d2;
+            }
+            
+            .log-success { 
+                background: #e8f5e9; 
+                color: #388e3c; 
+                border-left-color: #388e3c;
+            }
+            
+            .log-warning { 
+                background: #fff3e0; 
+                color: #f57c00; 
+                border-left-color: #f57c00;
+            }
+            
+            .log-error { 
+                background: #ffebee; 
+                color: #d32f2f; 
+                border-left-color: #d32f2f;
+            }
+            
+            .log-debug { 
+                background: #f3e5f5; 
+                color: #7b1fa2; 
+                border-left-color: #7b1fa2;
+            }
+            
+            .log-processing { 
+                background: #e0f2f1; 
+                color: #00796b; 
+                border-left-color: #00796b;
+            }
+            
+            .log-step {
+                background: #fff8e1;
+                color: #ff8f00;
+                border-left-color: #ff8f00;
+                font-weight: 500;
+            }
+            
+            .log-status {
+                background: #e8eaf6;
+                color: #3f51b5;
+                border-left-color: #3f51b5;
+                font-weight: 500;
+            }
+            
+            #youtube-reply-log-header button {
+                background: rgba(255,255,255,0.2);
+                border: none;
+                color: white;
+                padding: 4px 8px;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 12px;
+                transition: all 0.2s ease;
+            }
+            
+            #youtube-reply-log-header button:hover {
+                background: rgba(255,255,255,0.3);
+                transform: scale(1.1);
+            }
+            
+            #youtube-reply-log-header button:active {
+                transform: scale(0.95);
+            }
         `;
 
         document.head.appendChild(style);
         document.body.appendChild(this.window);
-
-        // Make draggable
-        this.makeDraggable();
 
         // Setup buttons
         document.getElementById('youtube-reply-log-clear').addEventListener('click', () => {
@@ -93,38 +292,91 @@ class FloatingLogWindow {
         });
 
         document.getElementById('youtube-reply-log-close').addEventListener('click', () => {
-            this.hide();
+            this.resetPosition();
+            this.hidePanel();
         });
-    }
-
-    makeDraggable() {
-        const header = document.getElementById('youtube-reply-log-header');
-        let isDragging = false;
-        let currentX;
-        let currentY;
-        let initialX;
-        let initialY;
-
-        header.addEventListener('mousedown', (e) => {
-            isDragging = true;
-            initialX = e.clientX - this.window.offsetLeft;
-            initialY = e.clientY - this.window.offsetTop;
-        });
-
-        document.addEventListener('mousemove', (e) => {
-            if (isDragging) {
-                e.preventDefault();
-                currentX = e.clientX - initialX;
-                currentY = e.clientY - initialY;
-                this.window.style.left = currentX + 'px';
-                this.window.style.top = currentY + 'px';
-                this.window.style.right = 'auto';
+        
+        // Setup click event for indicator
+        this.indicator.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (this.isPositioned) {
+                // 如果面板已被拖动过，重置位置
+                this.resetPosition();
+            } else {
+                // 切换面板显示
+                if (this.panel.style.display === 'none' || this.panel.style.display === '') {
+                    this.showPanel();
+                } else {
+                    this.hidePanel();
+                }
             }
         });
-
-        document.addEventListener('mouseup', () => {
-            isDragging = false;
+        
+        // Setup drag handle for indicator
+        const dragHandle = this.indicator.querySelector('.drag-handle');
+        dragHandle.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+            this.isIndicatorDragging = true;
+            this.dragOffset.y = e.clientY - this.window.offsetTop;
+            this.window.style.cursor = 'ns-resize';
+            e.preventDefault();
         });
+        
+        document.addEventListener('mousemove', (e) => {
+            if (this.isIndicatorDragging) {
+                const y = e.clientY - this.dragOffset.y;
+                const maxY = window.innerHeight - this.window.offsetHeight;
+                this.window.style.top = Math.max(0, Math.min(y, maxY)) + 'px';
+            }
+        });
+        
+        document.addEventListener('mouseup', () => {
+            if (this.isIndicatorDragging) {
+                this.isIndicatorDragging = false;
+                this.window.style.cursor = '';
+            }
+        });
+        
+        // Setup hover events
+        this.indicator.addEventListener('mouseenter', () => {
+            if (!this.isDragging && !this.isPositioned) {
+                this.isExpanded = true;
+            }
+        });
+        
+        this.indicator.addEventListener('mouseleave', () => {
+            if (!this.isDragging && !this.isPositioned) {
+                // 延迟收起，避免鼠标意外移出
+                setTimeout(() => {
+                    if (!this.panel.matches(':hover') && !this.indicator.matches(':hover')) {
+                        this.isExpanded = false;
+                        this.hidePanel();
+                    }
+                }, 500);
+            }
+        });
+        
+        // 面板本身的鼠标事件
+        this.panel.addEventListener('mouseenter', () => {
+            if (!this.isDragging && !this.isPositioned) {
+                this.isExpanded = true;
+            }
+        });
+        
+        this.panel.addEventListener('mouseleave', () => {
+            if (!this.isDragging && !this.isPositioned) {
+                // 延迟收起，避免鼠标意外移出
+                setTimeout(() => {
+                    if (!this.panel.matches(':hover') && !this.indicator.matches(':hover')) {
+                        this.isExpanded = false;
+                        this.hidePanel();
+                    }
+                }, 500);
+            }
+        });
+        
+        // Setup drag functionality
+        this.setupDrag();
     }
 
     setupEventListeners() {
@@ -148,6 +400,15 @@ class FloatingLogWindow {
     }
 
     addLog(type, message, data = null) {
+        // 过滤掉重复的自动回复状态日志
+        if (type === 'debug' && message.includes('自动回复状态:')) {
+            const currentStatus = JSON.stringify(data);
+            if (this.lastAutoReplyStatus === currentStatus) {
+                return; // 跳过重复的状态日志
+            }
+            this.lastAutoReplyStatus = currentStatus;
+        }
+        
         const log = {
             type,
             message,
@@ -163,9 +424,9 @@ class FloatingLogWindow {
     }
 
     renderLog(log) {
-        if (!this.window) return;
+        if (!this.panel) return;
         
-        const content = this.window.querySelector('#youtube-reply-log-content');
+        const content = this.panel.querySelector('#youtube-reply-log-content');
         const entry = document.createElement('div');
         entry.className = `log-entry log-${log.type}`;
         
@@ -187,33 +448,8 @@ class FloatingLogWindow {
 
     show() {
         if (this.window) {
-            // 确保窗口在body的最后（最上层）
-            document.body.appendChild(this.window);
-            
-            // 重置样式
-            this.window.style.cssText = `
-                position: fixed !important;
-                top: 20px !important;
-                right: 20px !important;
-                width: 400px !important;
-                height: 300px !important;
-                background: white !important;
-                border: 2px solid #4285f4 !important;
-                border-radius: 8px !important;
-                z-index: 2147483647 !important;
-                display: flex !important;
-                flex-direction: column !important;
-                font-family: monospace !important;
-                font-size: 12px !important;
-                box-shadow: 0 8px 32px rgba(0,0,0,0.5) !important;
-                opacity: 1 !important;
-                visibility: visible !important;
-                transform: none !important;
-            `;
-            
+            this.window.style.display = 'block';
             this.isVisible = true;
-        } else {
-            console.error('[YouTube AI Reply] 无法显示日志窗口：window元素不存在');
         }
     }
 
@@ -221,6 +457,20 @@ class FloatingLogWindow {
         if (this.window) {
             this.window.style.display = 'none';
             this.isVisible = false;
+        }
+    }
+    
+    hidePanel() {
+        if (this.panel && !this.isPositioned) {
+            this.panel.style.display = 'none';
+            this.panel.style.opacity = '0';
+        }
+    }
+    
+    showPanel() {
+        if (this.panel) {
+            this.panel.style.display = 'flex';
+            this.panel.style.opacity = '1';
         }
     }
 
@@ -234,10 +484,57 @@ class FloatingLogWindow {
 
     clearLogs() {
         this.logs = [];
-        const content = this.window.querySelector('#youtube-reply-log-content');
+        const content = this.panel.querySelector('#youtube-reply-log-content');
         if (content) {
             content.innerHTML = '';
         }
+    }
+    
+    // 重置面板位置
+    resetPosition() {
+        this.isPositioned = false;
+        this.panel.style.left = '';
+        this.panel.style.top = '';
+        this.panel.style.transform = '';
+        this.panel.classList.remove('dragging');
+        // 重置到默认的显示状态
+        this.panel.style.display = '';
+        this.panel.style.opacity = '';
+        this.addLog('info', '📌 日志面板已重置到初始位置');
+    }
+    
+    // 更新回复计数显示
+    updateReplyCount(count, max) {
+        this.replyCount = count;
+        this.maxReplies = max;
+        const countElement = this.indicator.querySelector('.reply-count');
+        if (countElement) {
+            countElement.textContent = `${count}/${max}`;
+            
+            // 根据进度改变颜色
+            const ratio = count / max;
+            if (ratio >= 1) {
+                countElement.style.background = 'rgba(244, 67, 54, 0.8)';
+            } else if (ratio >= 0.8) {
+                countElement.style.background = 'rgba(255, 152, 0, 0.8)';
+            } else {
+                countElement.style.background = 'rgba(76, 175, 80, 0.8)';
+            }
+        }
+    }
+    
+    // 设置当前回复的编号
+    setCurrentReplyNumber(number) {
+        this.currentReplyNumber = number;
+    }
+    
+    // 添加特殊日志类型
+    step(message, data = null) {
+        this.addLog('step', message, data);
+    }
+    
+    status(message, data = null) {
+        this.addLog('status', message, data);
     }
 
     info(message, data) { this.addLog('info', message, data); }
@@ -246,60 +543,68 @@ class FloatingLogWindow {
     error(message, data) { this.addLog('error', message, data); }
     debug(message, data) { this.addLog('debug', message, data); }
     processing(message, data) { this.addLog('processing', message, data); }
+    
+    // 拖动功能
+    setupDrag() {
+        const header = this.panel.querySelector('#youtube-reply-log-header');
+        
+        header.addEventListener('mousedown', (e) => {
+            // 如果正在拖动贴边按钮，不触发面板拖动
+            if (this.isIndicatorDragging) return;
+            
+            // 标记开始拖动
+            this.isDragging = true;
+            
+            // 计算鼠标相对于面板左上角的偏移
+            const rect = this.panel.getBoundingClientRect();
+            this.dragOffset.x = e.clientX - rect.left;
+            this.dragOffset.y = e.clientY - rect.top;
+            
+            // 添加拖动样式
+            this.panel.classList.add('dragging');
+            
+            // 立即将面板设置为fixed定位并保持当前位置
+            this.panel.style.left = rect.left + 'px';
+            this.panel.style.top = rect.top + 'px';
+            
+            // 防止文本选择
+            e.preventDefault();
+        });
+        
+        document.addEventListener('mousemove', (e) => {
+            if (this.isDragging) {
+                // 计算新的位置
+                const x = e.clientX - this.dragOffset.x;
+                const y = e.clientY - this.dragOffset.y;
+                
+                // 限制在窗口范围内
+                const maxX = window.innerWidth - this.panel.offsetWidth;
+                const maxY = window.innerHeight - this.panel.offsetHeight;
+                
+                // 更新面板位置
+                this.panel.style.left = Math.max(0, Math.min(x, maxX)) + 'px';
+                this.panel.style.top = Math.max(0, Math.min(y, maxY)) + 'px';
+            }
+        });
+        
+        document.addEventListener('mouseup', () => {
+            if (this.isDragging) {
+                this.isDragging = false;
+                this.panel.classList.remove('dragging');
+                
+                // 如果面板被拖动到其他位置，记住这个位置
+                if (this.panel.style.left && this.panel.style.top) {
+                    this.isPositioned = true;
+                    // 设置内联样式以确保面板保持可见
+                    this.panel.style.cssText += '; display: flex !important; opacity: 1 !important;';
+                }
+            }
+        });
+    }
 }
 
 // Create global log instance
 window.youtubeReplyLog = new FloatingLogWindow();
-
-// 添加独立的日志窗口按钮
-function addIndependentLogButton() {
-    // 检查是否已存在
-    if (document.getElementById('youtube-reply-log-indicator')) {
-        return;
-    }
-    
-    const logBtn = document.createElement('div');
-    logBtn.id = 'youtube-reply-log-indicator';
-    logBtn.innerHTML = '📋 LOG';
-    logBtn.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        background: #4285f4;
-        color: white;
-        padding: 8px 16px;
-        border-radius: 20px;
-        z-index: 2147483646;
-        cursor: pointer;
-        font-weight: bold;
-        font-size: 14px;
-        box-shadow: 0 4px 12px rgba(66, 133, 244, 0.4);
-        transition: all 0.3s ease;
-        user-select: none;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
-    `;
-    
-    logBtn.addEventListener('click', () => {
-        window.youtubeReplyLog.toggle();
-        // 改变按钮颜色作为反馈
-        logBtn.style.background = logBtn.style.background === 'rgb(255, 68, 68)' ? '#4285f4' : '#ff4444';
-    });
-    
-    logBtn.addEventListener('mouseenter', () => {
-        logBtn.style.transform = 'scale(1.05)';
-        logBtn.style.boxShadow = '0 6px 16px rgba(66, 133, 244, 0.6)';
-    });
-    
-    logBtn.addEventListener('mouseleave', () => {
-        logBtn.style.transform = 'scale(1)';
-        logBtn.style.boxShadow = '0 4px 12px rgba(66, 133, 244, 0.4)';
-    });
-    
-    document.body.appendChild(logBtn);
-}
-
-// 延迟添加按钮，确保页面加载完成
-setTimeout(addIndependentLogButton, 1000);
 
 // Export for use in other scripts
 window.youtubeReplyLog.version = '1.0.0';
