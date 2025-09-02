@@ -175,12 +175,19 @@ button {
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+  box-shadow: none;
+}
+
+button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
 }
 
 .primary-btn {
@@ -199,6 +206,30 @@ button:disabled {
 
 .secondary-btn:hover:not(:disabled) {
   background-color: #5a6268;
+}
+
+.btn-log {
+  background: linear-gradient(135deg, #ff8c00, #ff6347);
+  color: white;
+  border: none;
+}
+
+.btn-log:hover:not(:disabled) {
+  background: linear-gradient(135deg, #ff7f00, #ff4500);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(255, 99, 71, 0.3);
+}
+
+.btn-test {
+  background: linear-gradient(135deg, #6c757d, #495057);
+  color: white;
+  border: none;
+}
+
+.btn-test:hover:not(:disabled) {
+  background: linear-gradient(135deg, #5a6268, #343a40);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(108, 117, 125, 0.3);
 }
 
 /* Status Section */
@@ -265,17 +296,26 @@ button:disabled {
   border-bottom: 1px solid #e9ecef;
   display: flex;
   flex-direction: column;
-  gap: 10px;
 }
 
 .actions-section h2 {
   font-size: 18px;
-  margin-bottom: 15px;
+  margin-bottom: 20px;
   color: #495057;
+}
+
+.actions-section .button-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .actions-section button {
   width: 100%;
+  padding: 12px 20px;
+  font-size: 15px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
 }
 
 /* Help Section */

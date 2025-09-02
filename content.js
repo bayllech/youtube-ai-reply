@@ -16,12 +16,21 @@ class YouTubeCommentMonitor {
   }
 
   async init() {
-    console.log('YouTube AI Reply content script loaded');
+    // console.log('YouTube AI Reply content script loaded');
+    
+    // 初始化日志
+    if (window.youtubeReplyLog) {
+      window.youtubeReplyLog.info('=== 初始化 YouTube AI Reply ===');
+      window.youtubeReplyLog.info('版本:', '1.0');
+      window.youtubeReplyLog.info('页面URL:', window.location.href);
+    } else {
+      // console.log('youtubeReplyLog 未找到，日志功能不可用');
+    }
     
     // Wait for settings to load
     const settingsLoaded = await this.loadSettings();
     if (!settingsLoaded) {
-      console.log('Settings failed to load, retrying in 2 seconds...');
+      // console.log('Settings failed to load, retrying in 2 seconds...');
       setTimeout(async () => {
         await this.loadSettings();
         this.startCommentMonitoring();
@@ -40,14 +49,15 @@ class YouTubeCommentMonitor {
 
   async loadSettings() {
     try {
-      console.log('Loading settings...');
+      window.youtubeReplyLog?.debug('正在加载设置...');
       const response = await chrome.runtime.sendMessage({ action: 'getSettings' });
       if (response && response.success) {
-        this.settings = response.settings;
-        console.log('Settings loaded:', this.settings);
+        // 复制设置，保持autoReplyEnabled的原始值
+        this.settings = { ...response.settings };
+        window.youtubeReplyLog?.info('设置已加载:', { autoReply: this.settings.autoReplyEnabled });
         return true;
       } else {
-        console.log('Failed to load settings, using defaults');
+        window.youtubeReplyLog?.warning('加载设置失败，使用默认设置');
         // Set default settings
         this.settings = {
           autoReplyEnabled: false,
@@ -76,7 +86,7 @@ class YouTubeCommentMonitor {
     chrome.storage.onChanged.addListener((changes, namespace) => {
       if (namespace === 'sync' && changes.settings) {
         this.settings = changes.settings.newValue;
-        console.log('Settings updated:', this.settings);
+        window.youtubeReplyLog?.info('设置已更新:', { autoReply: this.settings.autoReplyEnabled });
       }
     });
   }
@@ -94,7 +104,7 @@ class YouTubeCommentMonitor {
         this.setupCommentObserver();
         // processExistingComments is now called in setupCommentObserver
       } else {
-        console.log('Waiting for comments section to load...');
+        // console.log('Waiting for comments section to load...');
         setTimeout(waitForComments, 1000);
       }
     };
@@ -110,7 +120,7 @@ class YouTubeCommentMonitor {
                            document.querySelector('.comments-section');
     
     if (!commentsSection) {
-      console.log('Comments section not found, retrying in 1 second...');
+      // console.log('Comments section not found, retrying in 1 second...');
       setTimeout(() => this.setupCommentObserver(), 1000);
       return;
     }
@@ -138,7 +148,7 @@ class YouTubeCommentMonitor {
                   !text.includes('Reply') && 
                   !text.includes('Share') &&
                   !this.isOwnReply(text)) {
-                console.log('Found comment text:', text.substring(0, 50) + '...');
+                // console.log('Found comment text:', text.substring(0, 50) + '...');
                 this.processNewComment(node);
               }
             } else {
@@ -151,7 +161,7 @@ class YouTubeCommentMonitor {
                     !text.includes('Reply') && 
                     !text.includes('Share') &&
                     !this.isOwnReply(text)) {
-                  console.log('Found comment text in container:', text.substring(0, 50) + '...');
+                  // console.log('Found comment text in container:', text.substring(0, 50) + '...');
                   this.processNewComment(comment);
                 }
               });
@@ -168,7 +178,7 @@ class YouTubeCommentMonitor {
       characterData: false
     });
 
-    console.log('Comment observer started');
+    // console.log('Comment observer started');
     // Process existing comments
     this.processExistingComments();
     
@@ -202,7 +212,7 @@ class YouTubeCommentMonitor {
     // Only log for elements that might actually be comments
     if ((element.id && element.id.includes('comment')) || 
         (element.className && element.className.includes('comment'))) {
-      console.log('Checking if element is comment:', element.tagName, element.id, element.className);
+      // console.log('Checking if element is comment:', element.tagName, element.id, element.className);
     }
     
     // Only accept elements that are actual comment text
@@ -223,9 +233,9 @@ class YouTubeCommentMonitor {
 
   processExistingComments() {
     try {
-      console.log('Processing existing comments...');
+      // console.log('Processing existing comments...');
       const existingComments = document.querySelectorAll('ytd-comment-thread-renderer #content-text, ytd-comment-renderer #content-text, ytcp-comment #content-text, #content-text.yt-core-attributed-string');
-      console.log('Found', existingComments.length, 'existing comments');
+      // console.log('Found', existingComments.length, 'existing comments');
       existingComments.forEach(comment => {
         // Only process if this looks like actual comment text and not our own reply
         const text = comment.textContent || '';
@@ -242,38 +252,41 @@ class YouTubeCommentMonitor {
     try {
       // Ensure settings are loaded
       if (!this.settings) {
-        console.log('Settings not loaded yet, loading now...');
+        window.youtubeReplyLog?.debug('设置未加载，正在加载...');
         await this.loadSettings();
       }
       
-      console.log('Auto-reply enabled:', this.settings?.autoReplyEnabled);
-      console.log('API key exists:', !!this.settings?.apiKey);
+      const commentText = this.extractCommentText(commentElement);
+      window.youtubeReplyLog?.processing(`处理评论: ${commentText?.substring(0, 30)}...`);
+      
+      window.youtubeReplyLog?.debug('自动回复状态:', { enabled: this.settings?.autoReplyEnabled, hasApiKey: !!this.settings?.apiKey });
       
       if (!this.settings?.autoReplyEnabled) {
-        console.log('Auto-reply is disabled in settings');
+        window.youtubeReplyLog?.debug('自动回复已禁用');
         return;
       }
       
       if (!this.settings?.apiKey) {
-        console.log('API key is not configured');
+        window.youtubeReplyLog?.warning('未配置API密钥');
         return;
       }
 
-      // Extract comment text early for duplicate checking
-      const commentText = this.extractCommentText(commentElement);
+      // Extract comment text was moved up
+      
       if (!commentText || commentText.trim().length < 10) {
+        window.youtubeReplyLog?.debug('评论太短，跳过');
         return;
       }
 
       // Check if we should skip this comment (short words, etc.)
       if (this.shouldSkipComment(commentText)) {
-        console.log('Skipping comment (too short or simple):', commentText.substring(0, 50));
+        window.youtubeReplyLog?.debug('跳过简单评论:', commentText.substring(0, 50));
         return;
       }
 
       // Check if this is an emoji-heavy comment
       if (this.isEmojiHeavy(commentText)) {
-        console.log('Emoji-heavy comment detected, will use emoji reply');
+        // console.log('Emoji-heavy comment detected, will use emoji reply');
         // Don't return here, we'll handle it in the reply generation
       }
 
@@ -289,7 +302,7 @@ class YouTubeCommentMonitor {
       if (this.lastProcessedTexts.has(recentKey)) {
         const lastProcessed = this.lastProcessedTexts.get(recentKey);
         if (now - lastProcessed < 10000) { // 10 second debounce for same text in similar position
-          console.log('Comment recently processed at this position, skipping');
+          // console.log('Comment recently processed at this position, skipping');
           return;
         }
       }
@@ -317,18 +330,18 @@ class YouTubeCommentMonitor {
       
       // Check if we've already processed this comment
       if (this.processedComments.has(commentId)) {
-        console.log(`Comment ${commentId} already processed, skipping`);
+        // console.log(`Comment ${commentId} already processed, skipping`);
         return;
       }
       
       // Also check by text content to be extra sure
       const textHash = this.simpleHash(commentText);
       if (this.processedComments.has(`text_${textHash}`)) {
-        console.log(`Comment with same text already processed, skipping`);
+        // console.log(`Comment with same text already processed, skipping`);
         return;
       }
 
-      console.log('New comment detected:', commentText.substring(0, 100) + '...');
+      // console.log('New comment detected:', commentText.substring(0, 100) + '...');
       
       // Add to reply queue with position info - but DON'T mark as processed yet
       this.replyQueue.push({
@@ -369,7 +382,7 @@ class YouTubeCommentMonitor {
       if (comment && (comment.hasAttribute('is-reply') || 
                      comment.closest('.comment-thread-replies') ||
                      comment.closest('ytcp-comment-replies'))) {
-        console.log('Skipping reply element');
+        // console.log('Skipping reply element');
         return 'reply_skip';
       }
       
@@ -384,7 +397,7 @@ class YouTubeCommentMonitor {
           // Use the ID with a hash of the comment text
           const textHash = this.simpleHash(commentText.substring(0, 100));
           const uniqueId = `${id}_${textHash}`;
-          console.log('Generated comment ID:', uniqueId);
+          // console.log('Generated comment ID:', uniqueId);
           return uniqueId;
         }
       }
@@ -392,7 +405,7 @@ class YouTubeCommentMonitor {
       // If no stable ID found, use hash of comment text
       const textHash = this.simpleHash(commentText);
       const uniqueId = `comment_${textHash}`;
-      console.log('Generated hash-based comment ID:', uniqueId);
+      // console.log('Generated hash-based comment ID:', uniqueId);
       return uniqueId;
     } catch (error) {
       console.error('Error getting comment ID:', error);
@@ -500,7 +513,7 @@ class YouTubeCommentMonitor {
       // Find the like button within the comment
       const commentContainer = commentElement.closest('ytcp-comment');
       if (!commentContainer) {
-        console.log('Comment container not found for like button');
+
         return;
       }
 
@@ -510,11 +523,11 @@ class YouTubeCommentMonitor {
                         commentContainer.querySelector('ytcp-comment-toggle-button#like-button ytcp-icon-button');
       
       if (likeButton) {
-        console.log('Found like button, clicking...');
+
         likeButton.click();
-        console.log('Like button clicked successfully');
+
       } else {
-        console.log('Like button not found');
+
       }
 
       // Also click the creator heart button
@@ -523,11 +536,11 @@ class YouTubeCommentMonitor {
                          commentContainer.querySelector('#creator-heart #creator-heart-button');
       
       if (heartButton) {
-        console.log('Found creator heart button, clicking...');
+
         heartButton.click();
-        console.log('Creator heart button clicked successfully');
+
       } else {
-        console.log('Creator heart button not found');
+
       }
 
     } catch (error) {
@@ -537,12 +550,12 @@ class YouTubeCommentMonitor {
 
   extractCommentText(commentElement) {
     try {
-      console.log('Attempting to extract comment text from element:', commentElement);
+
       
       // If the element itself is the content-text element, use its text directly
       if (commentElement.id === 'content-text' || commentElement.classList.contains('yt-core-attributed-string')) {
         const text = commentElement.textContent.trim();
-        console.log('Extracted comment text directly:', text.substring(0, 100) + '...');
+
         return text;
       }
       
@@ -553,21 +566,21 @@ class YouTubeCommentMonitor {
       
       if (textElement) {
         const text = textElement.textContent.trim();
-        console.log('Extracted comment text from selector:', text.substring(0, 100) + '...');
+
         return text;
       }
       
       // If the element is yt-formatted-string with content-text id
       if (commentElement.tagName === 'YT-FORMATTED-STRING' && commentElement.id === 'content-text') {
         const text = commentElement.textContent.trim();
-        console.log('Extracted comment text from yt-formatted-string:', text.substring(0, 100) + '...');
+
         return text;
       }
       
       // Last resort - use the element's text if it looks like a comment
       const text = commentElement.textContent.trim();
       if (text.length > 10 && !text.includes('Reply') && !text.includes('Share')) {
-        console.log('Extracted comment text from element:', text.substring(0, 100) + '...');
+
         return text;
       }
       
@@ -584,16 +597,16 @@ class YouTubeCommentMonitor {
     }
 
     this.isProcessing = true;
-    console.log(`Processing reply queue with ${this.replyQueue.length} comments`);
+
 
     while (this.replyQueue.length > 0) {
       const comment = this.replyQueue.shift();
-      console.log(`Processing comment: ${comment.commentId} - ${comment.commentText.substring(0, 50)}...`);
+
       
       // Double check if this comment has already been processed
       if (this.processedComments.has(comment.commentId) || 
           this.processedComments.has(`text_${comment.textHash}`)) {
-        console.log(`Comment ${comment.commentId} already processed, skipping`);
+
         continue;
       }
       
@@ -605,7 +618,7 @@ class YouTubeCommentMonitor {
       if (await this.shouldReplyToComment(comment)) {
         await this.generateAndPostReply(comment);
       } else {
-        console.log(`Skipping reply to comment: ${comment.commentId}`);
+
       }
 
       // Add delay between replies
@@ -613,15 +626,15 @@ class YouTubeCommentMonitor {
     }
 
     this.isProcessing = false;
-    console.log('Reply queue processing completed');
+
   }
 
   async shouldReplyToComment(comment) {
-    console.log('Checking if should reply to comment...');
+
     
     // Check if auto-reply is enabled
     if (!this.settings?.autoReplyEnabled) {
-      console.log('Auto-reply is disabled');
+
       this.stopAutoScroll();
       return false;
     }
@@ -630,9 +643,9 @@ class YouTubeCommentMonitor {
     if (this.settings?.maxRepliesPerSession) {
       const today = new Date().toDateString();
       const replyCount = await this.getTodayReplyCount();
-      console.log(`Today's reply count: ${replyCount}, max: ${this.settings.maxRepliesPerSession}`);
+
       if (replyCount >= this.settings.maxRepliesPerSession) {
-        console.log('Maximum replies reached for today');
+
         this.stopAutoScroll();
         return false;
       }
@@ -640,7 +653,7 @@ class YouTubeCommentMonitor {
 
     // Avoid replying to very short comments
     if (comment.commentText.length < 10) {
-      console.log('Comment too short, skipping');
+
       return false;
     }
 
@@ -648,11 +661,11 @@ class YouTubeCommentMonitor {
     const spamKeywords = ['subscribe', 'like', 'check out', 'visit my', 'my channel'];
     const lowerComment = comment.commentText.toLowerCase();
     if (spamKeywords.some(keyword => lowerComment.includes(keyword))) {
-      console.log('Comment contains spam keywords, skipping');
+
       return false;
     }
 
-    console.log('Should reply to comment: YES');
+
     return true;
   }
 
@@ -679,16 +692,18 @@ class YouTubeCommentMonitor {
 
   async generateAndPostReply(comment) {
     try {
-      console.log('Generating reply for:', comment.commentText.substring(0, 50) + '...');
+      window.youtubeReplyLog?.info('正在生成回复...');
+      window.youtubeReplyLog?.debug('评论内容:', comment.commentText.substring(0, 50));
 
       let replyText;
       
       // Check if this is an emoji-heavy comment and use emoji reply
       if (this.isEmojiHeavy(comment.commentText)) {
         replyText = this.generateEmojiReply();
-        console.log('Generated emoji reply:', replyText);
+        window.youtubeReplyLog?.info('生成表情回复:', replyText);
       } else {
         // Generate AI reply for regular comments
+        window.youtubeReplyLog?.debug('请求AI生成回复...');
         const response = await chrome.runtime.sendMessage({
           action: 'generateReply',
           commentText: comment.commentText,
@@ -700,7 +715,7 @@ class YouTubeCommentMonitor {
         }
 
         replyText = response.reply;
-        console.log('Generated AI reply:', replyText);
+        window.youtubeReplyLog?.success('AI回复已生成:', replyText);
       }
 
       // Post the reply
@@ -712,7 +727,7 @@ class YouTubeCommentMonitor {
       // Increment reply count
       await this.incrementReplyCount();
 
-      console.log('Reply posted successfully');
+
 
     } catch (error) {
       console.error('Error generating/posting reply:', error);
@@ -721,16 +736,18 @@ class YouTubeCommentMonitor {
 
   async postReply(commentElement, replyText) {
     try {
-      console.log('Attempting to post reply...', replyText.substring(0, 50) + '...');
+      window.youtubeReplyLog?.debug('正在发布回复...');
+      window.youtubeReplyLog?.debug('回复内容:', replyText.substring(0, 50));
       
       // Find the reply button using multiple selectors
       const replyButton = this.findReplyButton(commentElement);
       
       if (!replyButton) {
+        window.youtubeReplyLog?.error('未找到回复按钮');
         throw new Error('Reply button not found');
       }
 
-      console.log('Found reply button, clicking...');
+      window.youtubeReplyLog?.debug('找到回复按钮，正在点击...');
       replyButton.click();
       await this.sleep(2000); // Increased delay for YouTube Studio
 
@@ -739,7 +756,7 @@ class YouTubeCommentMonitor {
       
       if (!replyInput) {
         // Try to find the reply button again and click it once more
-        console.log('Reply input not found, trying to click reply button again...');
+        window.youtubeReplyLog?.debug('未找到回复输入框，重试...');
         replyButton.click();
         await this.sleep(1500);
         
@@ -748,10 +765,10 @@ class YouTubeCommentMonitor {
         if (!retryInput) {
           throw new Error('Reply input not found after retry');
         }
-        console.log('Found reply input on retry:', retryInput);
+
       }
 
-      console.log('Found reply input, typing text...');
+
       replyInput.focus();
       await this.typeText(replyInput, replyText);
 
@@ -762,7 +779,7 @@ class YouTubeCommentMonitor {
         throw new Error('Post button not found');
       }
 
-      console.log('Found post button, clicking...');
+
       postButton.click();
       
       // Wait for the reply to be posted
@@ -772,17 +789,17 @@ class YouTubeCommentMonitor {
       const postedSuccessfully = this.checkIfReplyWasPosted(replyText);
       
       if (postedSuccessfully) {
-        console.log('Reply verified as posted');
+
         
         // Only close the dialog if we're sure the reply was posted
         await this.sleep(1000); // Small delay before closing
         await this.closeReplyDialog();
       } else {
-        console.log('Could not verify if reply was posted, attempting to close dialog anyway');
+
         await this.closeReplyDialog();
       }
       
-      console.log('Reply posting process completed');
+
       return true;
 
     } catch (error) {
@@ -790,8 +807,8 @@ class YouTubeCommentMonitor {
       // Try to close any open dialogs
       await this.closeReplyDialog();
       // Log additional debugging information
-      console.log('Comment element for debugging:', commentElement);
-      console.log('Document body for debugging:', document.body.innerHTML.substring(0, 1000));
+
+
       throw error;
     }
   }
@@ -803,11 +820,11 @@ class YouTubeCommentMonitor {
                    commentElement.closest('ytcp-comment');
     
     if (!comment) {
-      console.log('Comment element not found for reply button');
+
       return null;
     }
 
-    console.log('Looking for reply button in comment element:', comment);
+
     
     // Try multiple selectors for reply button, prioritizing YouTube Studio selectors
     const replyButton = comment.querySelector('ytcp-comment-button#reply-button button') ||
@@ -822,18 +839,18 @@ class YouTubeCommentMonitor {
                         comment.querySelector('#reply-button-end');
     
     if (replyButton) {
-      console.log('Found reply button:', replyButton);
+
       return replyButton;
     } else {
-      console.log('Reply button not found in comment element');
+
       // Log the comment element for debugging
-      console.log('Comment element HTML:', comment.outerHTML.substring(0, 500));
+
       return null;
     }
   }
 
   findReplyInput() {
-    console.log('Looking for reply input...');
+
     
     // Try to find the textarea in YouTube Studio comment box
     const input = document.querySelector('ytcp-commentbox tp-yt-iron-autogrow-textarea textarea') ||
@@ -846,37 +863,29 @@ class YouTubeCommentMonitor {
                   document.querySelector('textarea[aria-label*="添加回复"]');
     
     if (input) {
-      console.log('Found reply input:', input);
-      console.log('Reply input tag, id, class, placeholder:', input.tagName, input.id, input.className, input.placeholder);
+
+
       return input;
     }
     
-    // Log all textareas for debugging
-    const allTextareas = document.querySelectorAll('textarea');
-    console.log('All textareas found:', allTextareas.length);
-    allTextareas.forEach((el, index) => {
-      console.log(`Textarea ${index}:`, el.tagName, el.id, el.className, el.placeholder, el.getAttribute('aria-label'));
-    });
-    
     // Fallback to contenteditable divs for regular YouTube
     const allEditable = document.querySelectorAll('div[contenteditable="true"]');
-    console.log('All contenteditable elements found:', allEditable.length);
     
     const fallbackInput = document.querySelector('ytcp-comment-simplebox-renderer div[contenteditable="true"]') ||
                          document.querySelector('ytd-comment-simplebox-renderer div[contenteditable="true"]') ||
                          document.querySelector('div[contenteditable="true"][role="textbox"]');
     
     if (fallbackInput) {
-      console.log('Found fallback reply input:', fallbackInput);
+
       return fallbackInput;
     }
     
-    console.log('Reply input not found');
+
     return null;
   }
 
   findPostButton() {
-    console.log('Looking for post button...');
+
     
     // Try multiple selectors for post button, updated for YouTube Studio's structure
     const postButton = document.querySelector('ytcp-comment-button#submit-button ytcp-button-shape button') ||
@@ -897,14 +906,14 @@ class YouTubeCommentMonitor {
                       document.querySelector('button#submit-button-end');
     
     if (postButton) {
-      console.log('Found post button:', postButton);
-      console.log('Post button tag, id, class, aria-label:', postButton.tagName, postButton.id, postButton.className, postButton.getAttribute('aria-label'));
+
+
       return postButton;
     }
     
     // Log all buttons for debugging
     const allButtons = document.querySelectorAll('button');
-    console.log('All buttons found:', allButtons.length);
+    // All buttons found: allButtons.length
     
     // Try to find any button with "回复", "Comment", or "Post" in aria-label or text
     const buttonsWithText = Array.from(allButtons).filter(button => {
@@ -915,7 +924,7 @@ class YouTubeCommentMonitor {
     });
     
     if (buttonsWithText.length > 0) {
-      console.log('Found buttons with relevant text:', buttonsWithText);
+
       // Return the last one (usually the post button appears last)
       return buttonsWithText[buttonsWithText.length - 1];
     }
@@ -925,16 +934,16 @@ class YouTubeCommentMonitor {
       const ariaLabel = button.getAttribute('aria-label') || '';
       const text = button.textContent || '';
       if (ariaLabel || text) {
-        console.log(`Button ${index}: aria-label="${ariaLabel}", text="${text}"`);
+
       }
     });
     
-    console.log('Post button not found');
+
     return null;
   }
 
   async typeText(element, text) {
-    console.log('Typing text into element:', element.tagName, element.type);
+
     
     // Wait a bit for the element to be fully ready
     await this.sleep(500);
@@ -980,7 +989,7 @@ class YouTubeCommentMonitor {
             }));
           }, 50);
         } catch (error) {
-          console.log('Error with iron textarea API, falling back to direct input:', error);
+
           // Fallback: try direct input
           element.focus();
           element.value = text;
@@ -1009,12 +1018,12 @@ class YouTubeCommentMonitor {
 
   async closeReplyDialog() {
     try {
-      console.log('Attempting to close reply dialog...');
+
       
       // First, check if there's an active reply dialog and close it properly
       const activeDialog = document.querySelector('ytcp-commentbox[is-reply][keyboard-focus]');
       if (activeDialog) {
-        console.log('Found active reply dialog with keyboard focus');
+
         
         // Try to find the cancel button within this specific dialog
         const cancelButton = activeDialog.querySelector('#cancel-button button') ||
@@ -1022,7 +1031,7 @@ class YouTubeCommentMonitor {
                              activeDialog.querySelector('ytcp-comment-button#cancel-button button');
         
         if (cancelButton) {
-          console.log('Found cancel button in active dialog, clicking...');
+
           cancelButton.click();
           await this.sleep(1000);
           return;
@@ -1033,7 +1042,7 @@ class YouTubeCommentMonitor {
         if (commentContainer) {
           const replyButton = commentContainer.querySelector('button[aria-label*="回复"]');
           if (replyButton) {
-            console.log('Found reply button for this comment, clicking to toggle...');
+
             replyButton.click();
             await this.sleep(1000);
             return;
@@ -1047,14 +1056,14 @@ class YouTubeCommentMonitor {
                            document.querySelector('button[aria-label*="取消"]');
       
       if (cancelButton) {
-        console.log('Found cancel button, clicking...');
+
         cancelButton.click();
         await this.sleep(1000);
         return;
       }
       
       // Try pressing Escape key
-      console.log('Trying Escape key to close dialog...');
+
       const escEvent = new KeyboardEvent('keydown', {
         key: 'Escape',
         keyCode: 27,
@@ -1067,26 +1076,26 @@ class YouTubeCommentMonitor {
       // Check if dialog is still open
       const remainingDialog = document.querySelector('ytcp-commentbox[is-reply]');
       if (!remainingDialog) {
-        console.log('Dialog successfully closed with Escape key');
+
         return;
       }
       
       // Last resort - but be more careful about which reply button we click
-      console.log('Dialog still open, looking for correct reply button to toggle...');
+
       const replyButtons = Array.from(document.querySelectorAll('button[aria-label*="回复"]'));
       
       // Find a reply button that has an open dialog
       for (const button of replyButtons) {
         const commentContainer = button.closest('ytcp-comment');
         if (commentContainer && commentContainer.querySelector('ytcp-commentbox[is-reply]')) {
-          console.log('Found reply button with open dialog, clicking to toggle...');
+
           button.click();
           await this.sleep(1000);
           break;
         }
       }
       
-      console.log('Dialog close attempt completed');
+
     } catch (error) {
       console.error('Error closing reply dialog:', error);
     }
@@ -1108,7 +1117,7 @@ class YouTubeCommentMonitor {
             const isReply = commentContainer.hasAttribute('is-reply') || 
                            commentContainer.closest('.comment-thread-replies') !== null;
             if (isReply || element.closest('ytcp-comment[is-reply]')) {
-              console.log('Found posted reply:', text.substring(0, 50) + '...');
+
               return true;
             }
           }
@@ -1123,7 +1132,7 @@ class YouTubeCommentMonitor {
   }
 
   async startAutoScroll() {
-    console.log('Starting auto-scroll to load more comments...');
+
     
     // Check if we're already scrolling
     if (this.isScrolling) {
@@ -1145,11 +1154,11 @@ class YouTubeCommentMonitor {
 
   checkAndScroll() {
     try {
-      console.log('checkAndScroll called - isProcessing:', this.isProcessing, 'lastScrollTime:', this.lastScrollTime);
+
       
       // Don't scroll if we're currently processing replies
       if (this.isProcessing) {
-        console.log('Skipping scroll - currently processing replies');
+
         return;
       }
       
@@ -1163,17 +1172,17 @@ class YouTubeCommentMonitor {
       const now = Date.now();
       // Only scroll if it's been at least 5 seconds since the last scroll
       if (now - this.lastScrollTime < 5000) {
-        console.log('Skipping scroll - too soon since last scroll');
+
         return;
       }
       
-      console.log('Proceeding with scroll check...');
+
       
       // Track if we've scrolled before to detect new content
       if (this.lastScrollHeight && this.activitySection) {
         const currentHeight = this.activitySection.scrollHeight;
         if (currentHeight > this.lastScrollHeight) {
-          console.log('New content detected - height increased from', this.lastScrollHeight, 'to', currentHeight);
+
           // Reset scroll position to continue scrolling
           this.lastScrollHeight = currentHeight;
         }
@@ -1183,7 +1192,7 @@ class YouTubeCommentMonitor {
       const loadMoreButton = document.querySelector('ytcp-button[aria-label*="Load more"], button[aria-label*="Load more"], ytcp-button[aria-label*="加载更多"], ytcp-button[aria-label*="更多"], button[aria-label*="更多"]');
       
       if (loadMoreButton) {
-        console.log('Found Load More button, clicking...');
+
         loadMoreButton.click();
         this.lastScrollTime = now;
         return;
@@ -1192,12 +1201,12 @@ class YouTubeCommentMonitor {
       // Try to find and click any "Show more replies" buttons
       const showMoreButtons = document.querySelectorAll('ytcp-button[aria-label*="Show more replies"], button[aria-label*="Show more replies"], ytcp-button[aria-label*="显示更多回复"], ytcp-button[aria-label*="更多回复"]');
       if (showMoreButtons.length > 0) {
-        console.log(`Found ${showMoreButtons.length} "Show more replies" buttons`);
+
         showMoreButtons.forEach(button => {
           if (!button.clicked) {
             button.click();
             button.clicked = true;
-            console.log('Clicked "Show more replies" button');
+
           }
         });
         this.lastScrollTime = now;
@@ -1218,7 +1227,7 @@ class YouTubeCommentMonitor {
         scrollHeight = activitySection.scrollHeight;
         clientHeight = activitySection.clientHeight;
         this.activitySection = activitySection;
-        console.log('Using YTCP-ACTIVITY-SECTION container:', { scrollTop, scrollHeight, clientHeight, bottom: scrollTop + clientHeight });
+
       } else {
         // Fallback to other containers
         const containers = [
@@ -1232,17 +1241,6 @@ class YouTubeCommentMonitor {
         ];
         
         // Debug: log all potential containers
-        console.log('Checking scroll containers:');
-        containers.forEach((container, index) => {
-          if (container) {
-            console.log(`Container ${index}:`, container.tagName + (container.id ? '#' + container.id : '') + (container.className ? '.' + container.className.split(' ').join('.') : ''), {
-              scrollHeight: container.scrollHeight,
-              clientHeight: container.clientHeight,
-              scrollTop: container.scrollTop,
-              isScrollable: container.scrollHeight > container.clientHeight
-            });
-          }
-        });
         
         for (const container of containers) {
           if (container && container.scrollHeight > container.clientHeight) {
@@ -1250,8 +1248,6 @@ class YouTubeCommentMonitor {
             scrollTop = container.scrollTop;
             scrollHeight = container.scrollHeight;
             clientHeight = container.clientHeight;
-            console.log('Found scroll container:', container.tagName + (container.id ? '#' + container.id : ''), 
-                        { scrollTop, scrollHeight, clientHeight, bottom: scrollTop + clientHeight });
             break;
           }
         }
@@ -1263,12 +1259,12 @@ class YouTubeCommentMonitor {
         scrollHeight = document.documentElement.scrollHeight;
         clientHeight = window.innerHeight;
         scrollContainer = window;
-        console.log('Using window scroll:', { scrollTop, scrollHeight, clientHeight, bottom: scrollTop + clientHeight });
+
       }
       
       // If we're near the bottom or if we haven't scrolled much, scroll down
       const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
-      console.log('Distance from bottom:', distanceFromBottom);
+
       
       if (distanceFromBottom < 1500 || scrollTop < 500) {
         if (scrollContainer === window) {
@@ -1278,11 +1274,11 @@ class YouTubeCommentMonitor {
         }
         this.lastScrollTime = now;
         this.lastScrollHeight = scrollHeight;
-        console.log('Scrolled down to load more comments');
+
         return;
       }
       
-      console.log('No scroll action needed at this time');
+
     } catch (error) {
       console.error('Error in auto-scroll:', error);
     }
@@ -1294,7 +1290,7 @@ class YouTubeCommentMonitor {
       this.scrollCheckInterval = null;
     }
     this.isScrolling = false;
-    console.log('Auto-scroll stopped');
+
   }
 
   sleep(ms) {
@@ -1303,7 +1299,7 @@ class YouTubeCommentMonitor {
 
   // Setup scroll detection to understand YouTube Studio scrolling
   setupScrollDetection() {
-    console.log('Setting up scroll detection...');
+
     
     // Monitor scroll events with capture phase
     const scrollTargets = [
@@ -1319,28 +1315,13 @@ class YouTubeCommentMonitor {
       document.querySelector('ytd-app')
     ].filter(Boolean);
     
-    console.log('Scroll targets:', scrollTargets.map(t => t?.tagName + (t?.id ? '#' + t?.id : '') + (t?.className ? '.' + t?.className.split(' ').join('.') : '')));
+
     
     scrollTargets.forEach(target => {
       if (!target) return;
       
       // Use capture phase and passive: false
       target.addEventListener('scroll', (event) => {
-        console.log('=== SCROLL DETECTED ===');
-        const element = event.target;
-        console.log('Target:', element);
-        console.log('Element info:', {
-          tagName: element.tagName,
-          id: element.id,
-          className: element.className,
-          scrollTop: element.scrollTop,
-          scrollHeight: element.scrollHeight,
-          clientHeight: element.clientHeight,
-          windowScrollY: window.scrollY,
-          windowScrollHeight: document.documentElement.scrollHeight,
-          windowClientHeight: window.innerHeight
-        });
-        
         // Check for new comments after scroll
         setTimeout(() => {
           this.checkForNewCommentsAfterScroll();
@@ -1348,21 +1329,14 @@ class YouTubeCommentMonitor {
       }, { capture: true, passive: false });
     });
     
-    // Also monitor wheel events with more details
+    // Also monitor wheel events
     document.addEventListener('wheel', (event) => {
-      console.log('=== WHEEL EVENT ===');
-      console.log('Wheel details:', {
-        deltaY: event.deltaY,
-        deltaX: event.deltaX,
-        target: event.target,
-        currentTarget: event.currentTarget,
-        path: event.composedPath().map(el => el?.tagName + (el?.id ? '#' + el?.id : '') + (el?.className ? '.' + el?.className.split(' ').join('.') : '')).slice(0, 5)
-      });
+      // Wheel event detected
     }, { capture: true, passive: false });
     
     // Also monitor touch events for mobile
     document.addEventListener('touchmove', (event) => {
-      console.log('=== TOUCH MOVE ===');
+      // Touch move event detected
     }, { capture: true, passive: false });
     
     // Monitor scroll on the whole document with timeout
@@ -1370,7 +1344,6 @@ class YouTubeCommentMonitor {
     setInterval(() => {
       const currentScrollTop = window.scrollY;
       if (currentScrollTop !== lastScrollTop) {
-        console.log('Scroll change detected:', { lastScrollTop, currentScrollTop, diff: currentScrollTop - lastScrollTop });
         lastScrollTop = currentScrollTop;
         this.checkForNewCommentsAfterScroll();
       }
@@ -1378,17 +1351,8 @@ class YouTubeCommentMonitor {
   }
   
   checkForNewCommentsAfterScroll() {
-    console.log('=== CHECKING FOR NEW COMMENTS AFTER SCROLL ===');
-    
     // Check document dimensions
-    console.log('Document dimensions:', {
-      scrollHeight: document.documentElement.scrollHeight,
-      scrollY: window.scrollY,
-      innerHeight: window.innerHeight
-    });
-    
     const existingComments = document.querySelectorAll('ytd-comment-thread-renderer #content-text, ytd-comment-renderer #content-text, ytcp-comment #content-text, #content-text.yt-core-attributed-string');
-    console.log('Comments after scroll:', existingComments.length);
     
     // Check all visible buttons
     const allButtons = document.querySelectorAll('button, ytcp-button');
@@ -1406,9 +1370,9 @@ class YouTubeCommentMonitor {
              label.toLowerCase().includes('更多回复');
     });
     
-    console.log('All buttons found:', allButtons.length);
-    console.log('Load more buttons:', loadMoreButtons.length, loadMoreButtons.map(b => b.getAttribute('aria-label')));
-    console.log('Show more buttons:', showMoreButtons.length, showMoreButtons.map(b => b.getAttribute('aria-label')));
+    // All buttons found: allButtons.length
+
+
     
     // Check if there are any elements with 'loading' text
     const loadingElements = document.querySelectorAll('*');
@@ -1420,13 +1384,10 @@ class YouTubeCommentMonitor {
     });
     
     if (loadingTexts.length > 0) {
-      console.log('Loading elements found:', loadingTexts.length, loadingTexts.slice(0, 3).map(el => el.textContent));
+      // Loading elements found
     }
   }
 }
-
-// Add more debugging information
-console.log('YouTube AI Reply content script loading... v2.1');
 
 // Initialize the comment monitor
 const commentMonitor = new YouTubeCommentMonitor();
@@ -1437,9 +1398,51 @@ window.youtubeAIReply = commentMonitor;
 // Add helper function to reset reply count
 window.resetReplyCount = function() {
   chrome.storage.local.remove(['replyCount'], () => {
-    console.log('Reply count has been reset');
+    // Reply count has been reset
   });
 };
 
-console.log('YouTube AI Reply content script initialized');
-console.log('Use resetReplyCount() in console to reset daily reply limit');
+// 添加消息监听器
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'ping') {
+    // 响应 ping 请求
+    sendResponse({ success: true, message: 'pong' });
+    return;
+  }
+  
+  if (request.action === 'checkLogExists') {
+    // 检查日志窗口是否存在
+    sendResponse({ 
+      success: true, 
+      exists: !!window.youtubeReplyLog 
+    });
+    return;
+  }
+  
+  if (request.action === 'autoReplyToggled') {
+
+    // 更新设置
+    commentMonitor.settings.autoReplyEnabled = request.enabled;
+    
+    // 记录日志
+    if (request.enabled) {
+      window.youtubeReplyLog?.info('自动回复已开启');
+      // 如果之前有未处理的评论，可以在这里处理
+    } else {
+      window.youtubeReplyLog?.info('自动回复已关闭');
+    }
+    
+    sendResponse({ success: true });
+  }
+  
+  if (request.action === 'toggleLog') {
+    // 处理日志窗口切换请求
+    if (window.youtubeReplyLog) {
+      window.youtubeReplyLog.toggle();
+      sendResponse({ success: true });
+    } else {
+      sendResponse({ success: false, error: 'Log window not available' });
+    }
+  }
+});
+

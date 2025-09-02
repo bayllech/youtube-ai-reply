@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>YouTube AI Reply 测试页面</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .warning {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .primary {
+            background: #4285f4;
+            color: white;
+        }
+        .secondary {
+            background: #6c757d;
+            color: white;
+        }
+        #log {
+            margin-top: 20px;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>YouTube AI Reply 测试页面</h1>
+    
+    <div class="warning">
+        <strong>注意：</strong>此测试页面需要在 Chrome 扩展环境中运行。请通过扩展的 popup 或 options 页面访问。
+    </div>
+    
+    <div class="section">
+        <h2>诊断信息</h2>
+        <div id="diagnostic"></div>
+    </div>
+    
+    <div class="section">
+        <h2>扩展状态测试</h2>
+        <button class="primary" onclick="testExtension()">测试扩展连接</button>
+        <button class="secondary" onclick="getSettings()">获取设置</button>
+        <button class="primary" onclick="toggleAutoReply()">切换自动回复</button>
+    </div>
+    
+    <div class="section">
+        <h2>日志窗口测试</h2>
+        <button class="primary" onclick="testLogWindow()">测试日志窗口</button>
+        <button class="secondary" onclick="checkLogWindow()">检查日志窗口</button>
+    </div>
+    
+    <div id="log"></div>
+
+    <script>
+        const logElement = document.getElementById('log');
+        const diagnosticElement = document.getElementById('diagnostic');
+        
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            logElement.textContent += `[${timestamp}] ${message}\n`;
+            console.log(`[Test] ${message}`);
+        }
+        
+        function showDiagnostic() {
+            const diagnostic = {
+                'chrome.runtime': typeof chrome !== 'undefined' && chrome.runtime,
+                'chrome.tabs': typeof chrome !== 'undefined' && chrome.tabs,
+                'chrome.scripting': typeof chrome !== 'undefined' && chrome.scripting,
+                'chrome.storage': typeof chrome !== 'undefined' && chrome.storage,
+                'URL': window.location.href,
+                'User Agent': navigator.userAgent
+            };
+            
+            diagnosticElement.innerHTML = `
+                <h3>环境信息</h3>
+                <pre>${JSON.stringify(diagnostic, null, 2)}</pre>
+            `;
+            
+            log('环境诊断信息已显示');
+        }
+        
+        async function testExtension() {
+            if (!chrome || !chrome.runtime) {
+                log('❌ chrome.runtime 不可用');
+                return;
+            }
+            
+            log('测试扩展连接...');
+            try {
+                const response = await chrome.runtime.sendMessage({ action: 'getSettings' });
+                if (response && response.success) {
+                    log('✅ 扩展连接成功');
+                    log(`设置: ${JSON.stringify(response.settings, null, 2)}`);
+                } else {
+                    log('❌ 扩展连接失败');
+                }
+            } catch (error) {
+                log(`❌ 错误: ${error.message}`);
+            }
+        }
+        
+        async function getSettings() {
+            if (!chrome || !chrome.runtime) {
+                log('❌ chrome.runtime 不可用');
+                return;
+            }
+            
+            log('获取设置...');
+            try {
+                const response = await chrome.runtime.sendMessage({ action: 'getSettings' });
+                if (response && response.success) {
+                    log(`当前设置: ${JSON.stringify(response.settings, null, 2)}`);
+                }
+            } catch (error) {
+                log(`❌ 获取设置失败: ${error.message}`);
+            }
+        }
+        
+        async function toggleAutoReply() {
+            if (!chrome || !chrome.runtime || !chrome.storage) {
+                log('❌ Chrome API 不可用');
+                return;
+            }
+            
+            log('切换自动回复状态...');
+            try {
+                const response = await chrome.runtime.sendMessage({ action: 'getSettings' });
+                if (response && response.success) {
+                    const newEnabled = !response.settings.autoReplyEnabled;
+                    await chrome.storage.sync.set({ 
+                        settings: { ...response.settings, autoReplyEnabled: newEnabled }
+                    });
+                    log(`✅ 自动回复已${newEnabled ? '开启' : '关闭'}`);
+                    
+                    // 通知当前标签页
+                    if (chrome.tabs) {
+                        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+                        if (tab) {
+                            chrome.tabs.sendMessage(tab.id, { 
+                                action: 'autoReplyToggled',
+                                enabled: newEnabled 
+                            });
+                        }
+                    }
+                }
+            } catch (error) {
+                log(`❌ 切换失败: ${error.message}`);
+            }
+        }
+        
+        async function testLogWindow() {
+            if (!chrome || !chrome.scripting || !chrome.tabs) {
+                log('❌ Chrome Scripting API 不可用');
+                return;
+            }
+            
+            log('测试日志窗口...');
+            try {
+                // 尝试注入日志窗口
+                await chrome.scripting.executeScript({
+                    target: { tabId: (await chrome.tabs.query({ active: true, currentWindow: true }))[0].id },
+                    files: ['log-window.js']
+                });
+                
+                // 等待初始化
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                // 发送切换消息
+                const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+                const response = await chrome.tabs.sendMessage(tab.id, { action: 'toggleLog' });
+                log(`✅ 日志窗口切换成功: ${JSON.stringify(response)}`);
+            } catch (error) {
+                log(`❌ 日志窗口测试失败: ${error.message}`);
+            }
+        }
+        
+        async function checkLogWindow() {
+            if (!chrome || !chrome.tabs) {
+                log('❌ Chrome Tabs API 不可用');
+                return;
+            }
+            
+            log('检查日志窗口状态...');
+            // 检查是否有日志窗口实例
+            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            try {
+                const response = await chrome.tabs.sendMessage(tab.id, { action: 'getLogStatus' });
+                log(`日志窗口状态: ${JSON.stringify(response)}`);
+            } catch (error) {
+                log(`❌ 无法获取日志窗口状态: ${error.message}`);
+            }
+        }
+        
+        // 页面加载时自动测试
+        window.onload = () => {
+            log('页面已加载，准备测试...');
+            showDiagnostic();
+        };
+    </script>
+</body>
+</html>

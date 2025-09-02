@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>YouTube AI Reply - 配置</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+      background-color: #f8f9fa;
+      color: #333;
+      line-height: 1.6;
+      padding: 20px;
+    }
+    
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      overflow: hidden;
+    }
+    
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 30px;
+      text-align: center;
+    }
+    
+    .header h1 {
+      font-size: 28px;
+      margin-bottom: 10px;
+    }
+    
+    .content {
+      padding: 30px;
+    }
+    
+    .section {
+      margin-bottom: 30px;
+      padding: 20px;
+      border: 1px solid #e9ecef;
+      border-radius: 8px;
+    }
+    
+    .section h2 {
+      color: #495057;
+      margin-bottom: 15px;
+      font-size: 20px;
+    }
+    
+    .form-group {
+      margin-bottom: 20px;
+    }
+    
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 500;
+      color: #495057;
+    }
+    
+    input[type="text"],
+    input[type="password"],
+    input[type="number"],
+    textarea,
+    select {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ced4da;
+      border-radius: 4px;
+      font-size: 14px;
+      transition: border-color 0.2s;
+    }
+    
+    input[type="text"]:focus,
+    input[type="password"]:focus,
+    input[type="number"]:focus,
+    textarea:focus,
+    select:focus {
+      outline: none;
+      border-color: #667eea;
+      box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
+    }
+    
+    textarea {
+      min-height: 120px;
+      resize: vertical;
+    }
+    
+    .small {
+      font-size: 12px;
+      color: #6c757d;
+      margin-top: 5px;
+    }
+    
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 4px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-right: 10px;
+      margin-bottom: 10px;
+    }
+    
+    .btn-primary {
+      background-color: #667eea;
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      background-color: #5a67d8;
+    }
+    
+    .btn-secondary {
+      background-color: #6c757d;
+      color: white;
+    }
+    
+    .btn-secondary:hover {
+      background-color: #5a6268;
+    }
+    
+    .btn-danger {
+      background-color: #dc3545;
+      color: white;
+    }
+    
+    .btn-danger:hover {
+      background-color: #c82333;
+    }
+    
+    .btn-success {
+      background-color: #28a745;
+      color: white;
+    }
+    
+    .btn-success:hover {
+      background-color: #218838;
+    }
+    
+    .preset-replies {
+      margin-top: 15px;
+    }
+    
+    .preset-item {
+      display: flex;
+      align-items: center;
+      padding: 10px;
+      border: 1px solid #e9ecef;
+      border-radius: 4px;
+      margin-bottom: 10px;
+      background: #f8f9fa;
+    }
+    
+    .preset-item input {
+      flex: 1;
+      margin-right: 10px;
+    }
+    
+    .preset-item .btn {
+      margin-right: 5px;
+    }
+    
+    .skip-rules {
+      margin-top: 15px;
+    }
+    
+    .rule-item {
+      display: flex;
+      align-items: center;
+      padding: 10px;
+      border: 1px solid #e9ecef;
+      border-radius: 4px;
+      margin-bottom: 10px;
+      background: #f8f9fa;
+    }
+    
+    .rule-item input {
+      flex: 1;
+      margin-right: 10px;
+    }
+    
+    .rule-item .btn {
+      margin-right: 5px;
+    }
+    
+    .notification {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 15px 20px;
+      border-radius: 4px;
+      color: white;
+      font-weight: 500;
+      z-index: 1000;
+      display: none;
+    }
+    
+    .notification.success {
+      background-color: #28a745;
+    }
+    
+    .notification.error {
+      background-color: #dc3545;
+    }
+    
+    .notification.info {
+      background-color: #17a2b8;
+    }
+    
+    .notification.warning {
+      background-color: #ffc107;
+      color: #212529;
+    }
+    
+    .toggle-switch {
+      position: relative;
+      display: inline-block;
+      width: 60px;
+      height: 34px;
+    }
+    
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #ccc;
+      transition: .4s;
+      border-radius: 34px;
+    }
+    
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 26px;
+      width: 26px;
+      left: 4px;
+      bottom: 4px;
+      background-color: white;
+      transition: .4s;
+      border-radius: 50%;
+    }
+    
+    input:checked + .slider {
+      background-color: #667eea;
+    }
+    
+    input:checked + .slider:before {
+      transform: translateX(26px);
+    }
+    
+    .example-reply {
+      background: white;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    
+    .example-reply:hover {
+      background-color: #f0f0f0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>YouTube AI Reply 配置</h1>
+      <p>配置自动回复参数和智能体设定</p>
+    </div>
+    
+    <div class="content">
+      <!-- 基础设置 -->
+      <div class="section">
+        <h2>基础设置</h2>
+        
+        <div class="form-group">
+          <label for="apiKey">Gemini API 密钥</label>
+          <input type="password" id="apiKey" placeholder="输入你的Gemini API密钥">
+          <p class="small">获取地址：<a href="https://makersuite.google.com/app/apikey" target="_blank">Google AI Studio</a></p>
+        </div>
+        
+        <div class="form-group">
+          <label for="replyDelay">回复延迟 (毫秒)</label>
+          <input type="number" id="replyDelay" min="1000" max="30000" value="3000">
+          <p class="small">建议设置3-5秒以避免被检测</p>
+        </div>
+        
+        <div class="form-group">
+          <label for="maxReplies">每日最大回复数</label>
+          <input type="number" id="maxReplies" min="1" max="100" value="10">
+        </div>
+        
+        <div class="form-group">
+          <label for="replyStyle">默认回复风格</label>
+          <select id="replyStyle">
+            <option value="friendly">友好型</option>
+            <option value="professional">专业型</option>
+            <option value="casual">随意型</option>
+            <option value="humorous">幽默型</option>
+          </select>
+        </div>
+      </div>
+      
+      <!-- AI角色配置 -->
+      <div class="section">
+        <h2>AI角色配置</h2>
+        <div class="form-group">
+          <label for="aiRole">智能体角色设定</label>
+          <textarea id="aiRole" placeholder="定义AI助手的角色和回复风格">我的频道内容是关于AI MUSIC的，一位AI美女歌手演唱，歌手名叫Bella，来自瑞典，年龄25岁。
+你是一个友好的AI助手，会根据频道评论内容,以Bella第一人称角度生成合适的回复。
+1.回复的文本在可以适当加入emoji表情
+2.无法理解的直接回复一颗💗</textarea>
+          <p class="small">定义AI助手的角色、背景知识和回复风格</p>
+        </div>
+      </div>
+      
+      <!-- 预置回复 -->
+      <div class="section">
+        <h2>预置回复内容</h2>
+        <div class="form-group">
+          <label>添加预置回复</label>
+          <div style="display: flex; gap: 10px;">
+            <input type="text" id="newPresetReply" placeholder="输入预置回复内容，如：感谢你的支持！💖">
+            <button class="btn btn-primary" id="addPresetReplyBtn">添加</button>
+          </div>
+          <p class="small">当评论符合跳过规则时，将从这些预置回复中随机选择一条</p>
+          <div style="background: #f3e5f5; padding: 12px; border-radius: 6px; margin-top: 10px; border-left: 4px solid #9c27b0;">
+            <strong style="color: #7b1fa2;">💬 示例回复：</strong>
+            <div style="margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px;">
+              <span class="example-reply" data-value="感谢你的评论！💖">感谢你的评论！💖</span>
+              <span class="example-reply" data-value="谢谢你的支持！🎵">谢谢你的支持！🎵</span>
+              <span class="example-reply" data-value="很高兴你喜欢我的音乐！🎶">很高兴你喜欢我的音乐！🎶</span>
+            </div>
+          </div>
+        </div>
+        
+        <div class="preset-replies" id="presetReplies">
+          <!-- 预置回复列表将在这里动态生成 -->
+        </div>
+      </div>
+      
+      <!-- 自动跳过规则 -->
+      <div class="section">
+        <h2>自动跳过规则</h2>
+        <div class="form-group">
+          <label>选择跳过规则</label>
+          <div style="display: flex; gap: 10px;">
+            <select id="skipRuleSelect" style="flex: 1; padding: 8px;">
+              <option value="">-- 选择要添加的规则 --</option>
+              <optgroup label="基础规则">
+                <option value="纯表情符号">纯表情符号（只含表情且长度<10）</option>
+                <option value="单个字或标点">单个字或标点（长度≤2个字符）</option>
+                <option value="无意义的字符">无意义的字符（纯符号且长度<5）</option>
+              </optgroup>
+              <optgroup label="内容类型规则">
+                <option value="英文评论">英文评论（只包含英文字母）</option>
+                <option value="数字评论">数字评论（只包含数字）</option>
+                <option value="链接评论">链接评论（包含网址链接）</option>
+              </optgroup>
+              <optgroup label="长度规则">
+                <option value="太短的评论">太短的评论（长度小于5个字符）</option>
+                <option value="太长的评论">太长的评论（长度大于100个字符）</option>
+              </optgroup>
+              <optgroup label="质量规则">
+                <option value="重复内容">重复内容（有连续重复字符）</option>
+              </optgroup>
+            </select>
+            <button class="btn btn-primary" id="addSkipRuleBtn">添加规则</button>
+          </div>
+          <p class="small">选择规则后点击添加，符合规则的评论将使用预置回复</p>
+          <div style="background: #e7f3ff; padding: 12px; border-radius: 6px; margin-top: 15px; border-left: 4px solid #2196f3;">
+            <strong style="color: #1976d2;">💡 使用提示：</strong>
+            <ul style="margin: 8px 0; padding-left: 20px; color: #424242;">
+              <li>建议选择"纯表情符号"、"单个字或标点"等基础规则</li>
+              <li>可以添加多个规则，满足任一规则就会使用预置回复</li>
+              <li>记得在下方预置回复中添加一些通用回复内容</li>
+            </ul>
+          </div>
+        </div>
+        
+        <div class="skip-rules" id="skipRules">
+          <!-- 跳过规则列表将在这里动态生成 -->
+        </div>
+      </div>
+      
+      <!-- 保存按钮 -->
+      <div style="text-align: center; margin-top: 30px;">
+        <button class="btn btn-success" id="saveSettingsBtn">保存配置</button>
+        <button class="btn btn-secondary" id="resetSettingsBtn">重置默认</button>
+      </div>
+    </div>
+  </div>
+  
+  <div class="notification" id="notification"></div>
+  
+  <script src="options.js"></script>
+</body>
+</html>

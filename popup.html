@@ -13,7 +13,7 @@
     </div>
 
     <div class="settings-section">
-      <h2>基础设置</h2>
+      <h2>快速控制</h2>
       
       <div class="setting-item toggle">
         <label class="switch">
@@ -24,33 +24,6 @@
           <h3>启用自动回复</h3>
           <p>自动检测并回复新的YouTube评论</p>
         </div>
-      </div>
-
-      <div class="setting-item">
-        <label for="apiKey">Gemini API 密钥</label>
-        <input type="password" id="apiKey" placeholder="输入你的Gemini API密钥">
-        <button id="saveApiKey" class="secondary-btn">保存</button>
-      </div>
-
-      <div class="setting-item">
-        <label for="replyStyle">回复风格</label>
-        <select id="replyStyle">
-          <option value="friendly">友好型</option>
-          <option value="professional">专业型</option>
-          <option value="casual">随意型</option>
-          <option value="humorous">幽默型</option>
-        </select>
-      </div>
-
-      <div class="setting-item">
-        <label for="replyDelay">回复延迟 (毫秒)</label>
-        <input type="number" id="replyDelay" min="1000" max="30000" value="3000">
-        <small>建议设置较长的延迟以避免被检测</small>
-      </div>
-
-      <div class="setting-item">
-        <label for="maxReplies">每日最大回复数</label>
-        <input type="number" id="maxReplies" min="1" max="100" value="10">
       </div>
     </div>
 
@@ -73,28 +46,30 @@
     </div>
 
     <div class="actions-section">
-      <button id="testApi" class="primary-btn">测试API</button>
-      <button id="resetSettings" class="secondary-btn">重置设置</button>
-      <button id="clearStats" class="secondary-btn">清除统计</button>
+      <h2>快捷操作</h2>
+      <div class="button-group">
+        <button id="testConnection" class="btn btn-test">🔧 测试连接</button>
+        <button id="openOptions" class="primary-btn">⚙️ 打开配置</button>
+        <button id="clearStats" class="secondary-btn">清除统计</button>
+      </div>
     </div>
 
     <div class="help-section">
-      <h2>使用说明</h2>
+      <h2>快速说明</h2>
       <div class="help-content">
-        <h3>如何获取Gemini API密钥：</h3>
+        <h3>使用步骤：</h3>
         <ol>
-          <li>访问 <a href="https://makersuite.google.com/app/apikey" target="_blank">Google AI Studio</a></li>
-          <li>登录你的Google账户</li>
-          <li>创建新的API密钥</li>
-          <li>复制密钥并粘贴到上面的输入框中</li>
+          <li>点击"⚙️ 打开配置"按钮进行详细设置</li>
+          <li>配置API密钥和AI角色</li>
+          <li>设置预置回复和跳过规则</li>
+          <li>返回此页面开启自动回复</li>
         </ol>
         
-        <h3>使用提示：</h3>
+        <h3>日志窗口：</h3>
         <ul>
-          <li>建议回复延迟设置在3-5秒之间</li>
-          <li>避免设置过高的每日回复数</li>
-          <li>定期检查API使用情况</li>
-          <li>建议使用友好的回复风格</li>
+          <li>页面右上角的"📋 LOG"按钮可以显示/隐藏日志窗口</li>
+          <li>快捷键：Ctrl + Shift + L 也可以显示/隐藏日志窗口</li>
+          <li>日志窗口会显示所有自动回复的详细信息</li>
         </ul>
       </div>
     </div>

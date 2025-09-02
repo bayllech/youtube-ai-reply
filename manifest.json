@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "YouTube AI Auto Reply",
-  "version": "1.0",
+  "version": "2.0",
   "description": "Automatically reply to YouTube comments using Zhipu AI",
   "permissions": [
     "storage",
     "activeTab",
-    "scripting"
+    "scripting",
+    "tabs"
   ],
   "host_permissions": [
     "https://www.youtube.com/*",
@@ -23,13 +24,14 @@
         "https://www.youtube.com/watch*",
         "https://studio.youtube.com/*"
       ],
-      "js": ["content.js"]
+      "js": ["log-window.js", "content.js"]
     }
   ],
   "action": {
     "default_popup": "popup.html",
     "default_title": "YouTube AI Reply"
   },
+  "options_page": "options.html",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png", 

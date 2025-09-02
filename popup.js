@@ -6,19 +6,6 @@ class PopupManager {
   }
 
   async init() {
-    console.log('Popup initialized');
-    
-    // Check if DOM elements exist
-    const container = document.querySelector('.container');
-    const header = document.querySelector('.header');
-    console.log('DOM elements found:');
-    console.log('container exists:', !!container);
-    console.log('header exists:', !!header);
-    console.log('container HTML:', container ? container.innerHTML.substring(0, 100) : 'null');
-    console.log('document.body children:', document.body.children.length);
-    console.log('HTML structure:');
-    console.log(document.documentElement.outerHTML);
-    
     // Force all sections to be visible
     this.forceVisibility();
     
@@ -43,7 +30,6 @@ class PopupManager {
       const response = await chrome.runtime.sendMessage({ action: 'getSettings' });
       if (response.success) {
         this.settings = response.settings;
-        console.log('Settings loaded:', this.settings);
       } else {
         console.error('Failed to load settings:', response.error);
       }
@@ -61,51 +47,11 @@ class PopupManager {
       });
     }
 
-    // API Key save button
-    const saveApiKeyBtn = document.getElementById('saveApiKey');
-    if (saveApiKeyBtn) {
-      saveApiKeyBtn.addEventListener('click', () => {
-        this.saveApiKey();
-      });
-    }
-
-    // Reply style change
-    const replyStyleSelect = document.getElementById('replyStyle');
-    if (replyStyleSelect) {
-      replyStyleSelect.addEventListener('change', (e) => {
-        this.updateSetting('replyStyle', e.target.value);
-      });
-    }
-
-    // Reply delay change
-    const replyDelayInput = document.getElementById('replyDelay');
-    if (replyDelayInput) {
-      replyDelayInput.addEventListener('change', (e) => {
-        this.updateSetting('replyDelay', parseInt(e.target.value));
-      });
-    }
-
-    // Max replies change
-    const maxRepliesInput = document.getElementById('maxReplies');
-    if (maxRepliesInput) {
-      maxRepliesInput.addEventListener('change', (e) => {
-        this.updateSetting('maxRepliesPerSession', parseInt(e.target.value));
-      });
-    }
-
-    // Test API button
-    const testApiBtn = document.getElementById('testApi');
-    if (testApiBtn) {
-      testApiBtn.addEventListener('click', () => {
-        this.testApi();
-      });
-    }
-
-    // Reset settings button
-    const resetSettingsBtn = document.getElementById('resetSettings');
-    if (resetSettingsBtn) {
-      resetSettingsBtn.addEventListener('click', () => {
-        this.resetSettings();
+    // Open options button
+    const openOptionsBtn = document.getElementById('openOptions');
+    if (openOptionsBtn) {
+      openOptionsBtn.addEventListener('click', () => {
+        chrome.runtime.openOptionsPage();
       });
     }
 
@@ -114,6 +60,15 @@ class PopupManager {
     if (clearStatsBtn) {
       clearStatsBtn.addEventListener('click', () => {
         this.clearStatistics();
+      });
+    }
+
+    
+    // Test connection button
+    const testConnectionBtn = document.getElementById('testConnection');
+    if (testConnectionBtn) {
+      testConnectionBtn.addEventListener('click', () => {
+        this.testConnection();
       });
     }
 
@@ -134,104 +89,35 @@ class PopupManager {
     if (autoReplyToggle) {
       autoReplyToggle.checked = this.settings.autoReplyEnabled || false;
     }
-
-    // Update API key field
-    const apiKeyInput = document.getElementById('apiKey');
-    if (apiKeyInput) {
-      apiKeyInput.value = this.settings.apiKey || '';
-    }
-
-    // Update reply style
-    const replyStyleSelect = document.getElementById('replyStyle');
-    if (replyStyleSelect) {
-      replyStyleSelect.value = this.settings.replyStyle || 'friendly';
-    }
-
-    // Update reply delay
-    const replyDelayInput = document.getElementById('replyDelay');
-    if (replyDelayInput) {
-      replyDelayInput.value = this.settings.replyDelay || 3000;
-    }
-
-    // Update max replies
-    const maxRepliesInput = document.getElementById('maxReplies');
-    if (maxRepliesInput) {
-      maxRepliesInput.value = this.settings.maxRepliesPerSession || 10;
-    }
   }
 
   async updateSetting(key, value) {
     try {
       this.settings[key] = value;
       await chrome.storage.sync.set({ settings: this.settings });
-      console.log(`Setting updated: ${key} = ${value}`);
       this.showNotification('设置已保存', 'success');
+      
+      // 通知content script更新状态
+      if (key === 'autoReplyEnabled') {
+        this.notifyContentScript();
+      }
     } catch (error) {
       console.error('Error updating setting:', error);
       this.showNotification('保存设置失败', 'error');
     }
   }
 
-  async saveApiKey() {
-    const apiKeyInput = document.getElementById('apiKey');
-    const apiKey = apiKeyInput.value.trim();
-    
-    if (!apiKey) {
-      this.showNotification('请输入API密钥', 'error');
-      return;
-    }
-
-    // Basic validation for Zhipu AI API key (should not be empty)
-    if (apiKey.length < 10) {
-      this.showNotification('API密钥格式不正确', 'error');
-      return;
-    }
-
+  async notifyContentScript() {
     try {
-      await this.updateSetting('apiKey', apiKey);
-      this.showNotification('API密钥已保存', 'success');
-      
-      // Test the API key
-      setTimeout(() => {
-        this.testApi();
-      }, 1000);
-    } catch (error) {
-      console.error('Error saving API key:', error);
-      this.showNotification('保存API密钥失败', 'error');
-    }
-  }
-
-  async testApi() {
-    const testApiBtn = document.getElementById('testApi');
-    const apiStatus = document.getElementById('apiStatus');
-    
-    testApiBtn.disabled = true;
-    testApiBtn.textContent = '测试中...';
-    apiStatus.textContent = '测试中...';
-    apiStatus.className = 'status-value testing';
-
-    try {
-      const response = await chrome.runtime.sendMessage({
-        action: 'generateReply',
-        commentText: 'Hello, this is a test comment.',
-        replyStyle: 'friendly'
-      });
-
-      if (response.success) {
-        apiStatus.textContent = '正常';
-        apiStatus.className = 'status-value success';
-        this.showNotification('API测试成功', 'success');
-      } else {
-        throw new Error(response.error);
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab && tab.url.includes('youtube.com')) {
+        chrome.tabs.sendMessage(tab.id, { 
+          action: 'autoReplyToggled',
+          enabled: this.settings.autoReplyEnabled 
+        });
       }
     } catch (error) {
-      console.error('API test failed:', error);
-      apiStatus.textContent = '错误';
-      apiStatus.className = 'status-value error';
-      this.showNotification('API测试失败: ' + error.message, 'error');
-    } finally {
-      testApiBtn.disabled = false;
-      testApiBtn.textContent = '测试API';
+      // Silent fail when notifying content script
     }
   }
 
@@ -262,31 +148,6 @@ class PopupManager {
     }
   }
 
-  async resetSettings() {
-    if (!confirm('确定要重置所有设置吗？此操作不可撤销。')) {
-      return;
-    }
-
-    try {
-      const defaultSettings = {
-        enabled: false,
-        apiKey: '',
-        replyDelay: 3000,
-        replyStyle: 'friendly',
-        maxRepliesPerSession: 10,
-        autoReplyEnabled: false
-      };
-
-      this.settings = defaultSettings;
-      await chrome.storage.sync.set({ settings: defaultSettings });
-      this.updateUI();
-      this.showNotification('设置已重置', 'success');
-    } catch (error) {
-      console.error('Error resetting settings:', error);
-      this.showNotification('重置设置失败', 'error');
-    }
-  }
-
   async checkApiStatus() {
     const apiStatus = document.getElementById('apiStatus');
     
@@ -296,8 +157,7 @@ class PopupManager {
       return;
     }
 
-    // For Zhipu AI, we can't easily check API key validity without making a full request
-    // So we'll just show "已配置" when API key exists
+    // 简单检查API密钥是否存在
     apiStatus.textContent = '已配置';
     apiStatus.className = 'status-value success';
   }
@@ -321,9 +181,127 @@ class PopupManager {
     notification.style.display = 'none';
   }
 
-  forceVisibility() {
-    console.log('Forcing visibility of all sections...');
+  // 测试连接功能
+  async testConnection() {
+    console.log('=== 开始连接测试 ===');
     
+    // 1. 测试与 background script 的连接
+    try {
+      console.log('测试 background script 连接...');
+      const response = await chrome.runtime.sendMessage({ action: 'getSettings' });
+      if (response && response.success) {
+        console.log('✅ Background script 连接成功');
+        console.log('当前设置:', response.settings);
+        
+        // 测试存储
+        console.log('测试存储功能...');
+        await chrome.storage.sync.set({ test: 'test_value' });
+        const result = await chrome.storage.sync.get('test');
+        if (result.test === 'test_value') {
+          console.log('✅ 存储功能正常');
+          await chrome.storage.sync.remove('test');
+        }
+      } else {
+        console.error('❌ Background script 连接失败');
+      }
+    } catch (error) {
+      console.error('❌ Background script 测试失败:', error);
+    }
+    
+    // 2. 测试与 content script 的连接
+    try {
+      console.log('测试 content script 连接...');
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab && tab.url.includes('youtube.com')) {
+        const response = await chrome.tabs.sendMessage(tab.id, { action: 'ping' });
+        if (response && response.success) {
+          console.log('✅ Content script 连接成功');
+        } else {
+          console.log('⚠️ Content script 未响应');
+        }
+      } else {
+        console.log('⚠️ 当前不是 YouTube 页面');
+      }
+    } catch (error) {
+      console.log('⚠️ Content script 连接失败 (可能未加载):', error.message);
+    }
+    
+    // 3. 测试权限
+    console.log('测试权限...');
+    try {
+      const permissions = await chrome.permissions.getAll();
+      console.log('✅ 当前权限:', permissions.permissions);
+      console.log('✅ 主机权限:', permissions.origins);
+    } catch (error) {
+      console.error('❌ 权限检查失败:', error);
+    }
+    
+    // 4. 测试日志窗口
+    console.log('测试日志窗口功能...');
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab && tab.url.includes('youtube.com')) {
+        // 检查是否可以注入脚本
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          function: () => {
+            console.log('脚本注入测试成功');
+            
+            // 检查日志窗口是否存在
+            const existingLog = document.getElementById('simple-youtube-log-window') || 
+                              document.getElementById('youtube-reply-log-window');
+            console.log('现有日志窗口检查:', existingLog ? '找到' : '未找到');
+            
+            return {
+              injection: 'success',
+              existingLog: !!existingLog
+            };
+          }
+        });
+        console.log('✅ 脚本注入权限正常');
+        
+        // 测试实际的日志窗口创建
+        console.log('测试创建日志窗口...');
+        // 直接注入而不是调用 showLogWindow 以避免递归
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          function: () => {
+            console.log('=== 测试创建日志窗口 ===');
+            const testDiv = document.createElement('div');
+            testDiv.id = 'test-log-window';
+            testDiv.style.cssText = `
+              position: fixed;
+              top: 50px;
+              right: 50px;
+              width: 300px;
+              height: 100px;
+              background: #4285f4;
+              color: white;
+              padding: 10px;
+              z-index: 999999;
+              border-radius: 5px;
+            `;
+            testDiv.innerHTML = '📋 测试日志窗口<br><small>3秒后自动消失</small>';
+            document.body.appendChild(testDiv);
+            
+            setTimeout(() => {
+              if (testDiv.parentNode) {
+                testDiv.remove();
+              }
+            }, 3000);
+          }
+        });
+        console.log('✅ 测试日志窗口创建命令已发送');
+      }
+    } catch (error) {
+      console.error('❌ 日志窗口测试失败:', error);
+    }
+    
+    console.log('=== 连接测试完成 ===');
+    this.showNotification('连接测试已完成，请查看控制台', 'info');
+  }
+
+  forceVisibility() {
     // Force container and all sections to be visible
     const container = document.querySelector('.container');
     const sections = document.querySelectorAll('.settings-section, .status-section, .actions-section, .help-section');
@@ -332,20 +310,13 @@ class PopupManager {
       container.style.display = 'block';
       container.style.visibility = 'visible';
       container.style.opacity = '1';
-      console.log('Container forced visible');
     }
     
     sections.forEach((section, index) => {
       section.style.display = 'block';
       section.style.visibility = 'visible';
       section.style.opacity = '1';
-      console.log(`Section ${index} forced visible`);
     });
-    
-    // Log the container HTML after forcing visibility
-    setTimeout(() => {
-      console.log('Container HTML after force visibility:', container ? container.innerHTML.substring(0, 200) : 'null');
-    }, 100);
   }
 }
 
