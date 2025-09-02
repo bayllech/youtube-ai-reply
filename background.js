@@ -50,7 +50,10 @@ class YouTubeAIReply {
 
       // 检查是否应该使用预置回复
       if (this.shouldUsePresetReply(commentText, config)) {
-        return this.getRandomPresetReply(config);
+        return {
+          reply: this.getRandomPresetReply(config),
+          actions: []
+        };
       }
 
       // 使用AI生成回复
@@ -79,8 +82,34 @@ class YouTubeAIReply {
         throw new Error(data.error.message);
       }
 
-      const reply = data.choices[0].message.content;
-      return reply.trim();
+      const aiResponse = data.choices[0].message.content.trim();
+      
+      // 尝试解析JSON响应
+      try {
+        // 处理可能的markdown格式
+        let jsonStr = aiResponse;
+        if (aiResponse.startsWith('```json')) {
+          jsonStr = aiResponse.replace(/```json\n?/, '').replace(/\n?```$/, '');
+        } else if (aiResponse.startsWith('```')) {
+          jsonStr = aiResponse.replace(/```\n?/, '').replace(/\n?```$/, '');
+        }
+        
+        const parsed = JSON.parse(jsonStr.trim());
+        return {
+          reply: parsed.reply,
+          quality: parsed.quality,
+          actions: parsed.actions || []
+        };
+      } catch (parseError) {
+        // 如果解析失败，返回原始回复内容（兼容性处理）
+        console.warn('Failed to parse AI response as JSON, using fallback:', parseError);
+        console.warn('AI response was:', aiResponse);
+        return {
+          reply: aiResponse,
+          quality: 'average',
+          actions: []
+        };
+      }
 
     } catch (error) {
       console.error('Error generating reply:', error);
@@ -158,7 +187,24 @@ ${stylePrompts[style] || stylePrompts.friendly}
 
 Original comment: "${commentText}"
 
-Please reply with the response content only, and keep it very short. Do not add any other text.`;
+请根据评论内容评估其质量，并按以下JSON格式回复：
+{
+  "reply": "你的回复内容",
+  "quality": "excellent|good|average",
+  "actions": ["like", "heart"]
+}
+
+质量评估标准：
+- excellent: 评论内容深入、有见解、表达真诚或极具创意
+- good: 评论积极正面、表达支持或简单但有意义的反馈
+- average: 普通评论、简单表达或内容较少
+
+操作规则：
+- excellent质量：同时点赞和点红心 ["like", "heart"]
+- good质量：只点赞 ["like"]
+- average质量：不进行任何操作 []
+
+请确保回复是有效的JSON格式。`;
   }
 
   // Check if auto-reply is enabled

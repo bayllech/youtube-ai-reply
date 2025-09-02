@@ -513,7 +513,7 @@ class YouTubeCommentMonitor {
       // Find the like button within the comment
       const commentContainer = commentElement.closest('ytcp-comment');
       if (!commentContainer) {
-
+        window.youtubeReplyLog?.debug('未找到评论容器，跳过点赞');
         return;
       }
 
@@ -523,28 +523,40 @@ class YouTubeCommentMonitor {
                         commentContainer.querySelector('ytcp-comment-toggle-button#like-button ytcp-icon-button');
       
       if (likeButton) {
-
         likeButton.click();
-
+        window.youtubeReplyLog?.info('已为评论点赞');
       } else {
-
+        window.youtubeReplyLog?.debug('未找到点赞按钮');
       }
 
-      // Also click the creator heart button
+    } catch (error) {
+      console.error('Error clicking like button:', error);
+    }
+  }
+
+  async clickHeartButton(commentElement) {
+    try {
+      // Find the heart button within the comment
+      const commentContainer = commentElement.closest('ytcp-comment');
+      if (!commentContainer) {
+        window.youtubeReplyLog?.debug('未找到评论容器，跳过点红心');
+        return;
+      }
+
+      // Click the creator heart button
       const heartButton = commentContainer.querySelector('#creator-heart-button ytcp-icon-button') ||
                          commentContainer.querySelector('#creator-heart-button button') ||
                          commentContainer.querySelector('#creator-heart #creator-heart-button');
       
       if (heartButton) {
-
         heartButton.click();
-
+        window.youtubeReplyLog?.info('已为评论点红心');
       } else {
-
+        window.youtubeReplyLog?.debug('未找到红心按钮');
       }
 
     } catch (error) {
-      console.error('Error clicking buttons:', error);
+      console.error('Error clicking heart button:', error);
     }
   }
 
@@ -697,10 +709,13 @@ class YouTubeCommentMonitor {
 
       let replyText;
       
+      let aiResponse = null; // 用于存储AI响应，初始为null
+      
       // Check if this is an emoji-heavy comment and use emoji reply
       if (this.isEmojiHeavy(comment.commentText)) {
         replyText = this.generateEmojiReply();
         window.youtubeReplyLog?.info('生成表情回复:', replyText);
+        // emoji回复不执行点赞操作
       } else {
         // Generate AI reply for regular comments
         window.youtubeReplyLog?.debug('请求AI生成回复...');
@@ -714,15 +729,41 @@ class YouTubeCommentMonitor {
           throw new Error(response.error);
         }
 
-        replyText = response.reply;
-        window.youtubeReplyLog?.success('AI回复已生成:', replyText);
+        // 保存AI响应信息用于后续操作
+        aiResponse = response.reply;
+        
+        // 处理新的响应格式
+        if (typeof aiResponse === 'object' && aiResponse !== null) {
+          // 新格式：包含reply、quality和actions
+          replyText = aiResponse.reply;
+          const actions = aiResponse.actions || [];
+          
+          window.youtubeReplyLog?.success('AI回复已生成:', replyText);
+          window.youtubeReplyLog?.info('评论质量:', aiResponse.quality);
+          window.youtubeReplyLog?.info('执行操作:', actions);
+        } else {
+          // 旧格式：直接返回回复文本
+          replyText = aiResponse;
+          window.youtubeReplyLog?.success('AI回复已生成:', replyText);
+        }
       }
 
       // Post the reply
       await this.postReply(comment.element, replyText);
 
-      // Click the like button for the comment
-      await this.clickLikeButton(comment.element);
+      // 根据AI判断执行点赞和点红心操作
+      if (typeof aiResponse === 'object' && aiResponse !== null && aiResponse.actions) {
+        const actions = aiResponse.actions;
+        if (actions.includes('like')) {
+          await this.clickLikeButton(comment.element);
+        }
+        if (actions.includes('heart')) {
+          await this.clickHeartButton(comment.element);
+        }
+      } else {
+        // 对于旧格式或非AI回复，不执行点赞和点红心
+        window.youtubeReplyLog?.debug('非AI回复或旧格式，跳过点赞和点红心');
+      }
 
       // Increment reply count
       await this.incrementReplyCount();
