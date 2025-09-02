@@ -624,10 +624,21 @@ class YouTubeCommentMonitor {
       // Wait for the reply to be posted
       await this.sleep(3000);
       
-      // Close the reply dialog if it's still open
-      await this.closeReplyDialog();
+      // Check if the post was successful by looking for our reply text
+      const postedSuccessfully = this.checkIfReplyWasPosted(replyText);
       
-      console.log('Reply posted successfully');
+      if (postedSuccessfully) {
+        console.log('Reply verified as posted');
+        
+        // Only close the dialog if we're sure the reply was posted
+        await this.sleep(1000); // Small delay before closing
+        await this.closeReplyDialog();
+      } else {
+        console.log('Could not verify if reply was posted, attempting to close dialog anyway');
+        await this.closeReplyDialog();
+      }
+      
+      console.log('Reply posting process completed');
       return true;
 
     } catch (error) {
@@ -856,7 +867,37 @@ class YouTubeCommentMonitor {
     try {
       console.log('Attempting to close reply dialog...');
       
-      // Try to find and click the cancel button
+      // First, check if there's an active reply dialog and close it properly
+      const activeDialog = document.querySelector('ytcp-commentbox[is-reply][keyboard-focus]');
+      if (activeDialog) {
+        console.log('Found active reply dialog with keyboard focus');
+        
+        // Try to find the cancel button within this specific dialog
+        const cancelButton = activeDialog.querySelector('#cancel-button button') ||
+                             activeDialog.querySelector('button[aria-label*="取消"]') ||
+                             activeDialog.querySelector('ytcp-comment-button#cancel-button button');
+        
+        if (cancelButton) {
+          console.log('Found cancel button in active dialog, clicking...');
+          cancelButton.click();
+          await this.sleep(1000);
+          return;
+        }
+        
+        // If no cancel button, try to find the reply button that opened this dialog
+        const commentContainer = activeDialog.closest('ytcp-comment');
+        if (commentContainer) {
+          const replyButton = commentContainer.querySelector('button[aria-label*="回复"]');
+          if (replyButton) {
+            console.log('Found reply button for this comment, clicking to toggle...');
+            replyButton.click();
+            await this.sleep(1000);
+            return;
+          }
+        }
+      }
+      
+      // Fallback: try to find any cancel button
       const cancelButton = document.querySelector('ytcp-comment-button#cancel-button button') ||
                            document.querySelector('#cancel-button button') ||
                            document.querySelector('button[aria-label*="取消"]');
@@ -868,34 +909,72 @@ class YouTubeCommentMonitor {
         return;
       }
       
-      // Try to close by clicking outside the dialog
-      const dialog = document.querySelector('#reply-dialog-container') || 
-                    document.querySelector('ytcp-commentbox[is-reply]');
+      // Try pressing Escape key
+      console.log('Trying Escape key to close dialog...');
+      const escEvent = new KeyboardEvent('keydown', {
+        key: 'Escape',
+        keyCode: 27,
+        bubbles: true,
+        cancelable: true
+      });
+      document.dispatchEvent(escEvent);
+      await this.sleep(500);
       
-      if (dialog) {
-        console.log('Found reply dialog, attempting to close...');
-        // Try pressing Escape key
-        const escEvent = new KeyboardEvent('keydown', {
-          key: 'Escape',
-          keyCode: 27,
-          bubbles: true,
-          cancelable: true
-        });
-        document.dispatchEvent(escEvent);
-        await this.sleep(1000);
+      // Check if dialog is still open
+      const remainingDialog = document.querySelector('ytcp-commentbox[is-reply]');
+      if (!remainingDialog) {
+        console.log('Dialog successfully closed with Escape key');
+        return;
       }
       
-      // Last resort: click the reply button again to toggle the dialog
-      const replyButtons = document.querySelectorAll('button[aria-label*="回复"]');
-      if (replyButtons.length > 0) {
-        console.log('Clicking reply button to toggle dialog...');
-        replyButtons[0].click();
-        await this.sleep(1000);
+      // Last resort - but be more careful about which reply button we click
+      console.log('Dialog still open, looking for correct reply button to toggle...');
+      const replyButtons = Array.from(document.querySelectorAll('button[aria-label*="回复"]'));
+      
+      // Find a reply button that has an open dialog
+      for (const button of replyButtons) {
+        const commentContainer = button.closest('ytcp-comment');
+        if (commentContainer && commentContainer.querySelector('ytcp-commentbox[is-reply]')) {
+          console.log('Found reply button with open dialog, clicking to toggle...');
+          button.click();
+          await this.sleep(1000);
+          break;
+        }
       }
       
       console.log('Dialog close attempt completed');
     } catch (error) {
       console.error('Error closing reply dialog:', error);
+    }
+  }
+
+  checkIfReplyWasPosted(replyText) {
+    try {
+      // Look for the reply text in the document
+      const textElements = document.querySelectorAll('#content-text, .yt-core-attributed-string');
+      
+      for (const element of textElements) {
+        const text = element.textContent || '';
+        // Check if this element contains our reply text
+        if (text.includes(replyText.substring(0, 20)) && text.length >= replyText.length * 0.8) {
+          // Check if this is a reply (not the original comment)
+          const commentContainer = element.closest('ytcp-comment');
+          if (commentContainer) {
+            // Check if it has the 'is-reply' attribute or is inside a reply thread
+            const isReply = commentContainer.hasAttribute('is-reply') || 
+                           commentContainer.closest('.comment-thread-replies') !== null;
+            if (isReply || element.closest('ytcp-comment[is-reply]')) {
+              console.log('Found posted reply:', text.substring(0, 50) + '...');
+              return true;
+            }
+          }
+        }
+      }
+      
+      return false;
+    } catch (error) {
+      console.error('Error checking if reply was posted:', error);
+      return false;
     }
   }
 
