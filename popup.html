@@ -32,7 +32,23 @@
       <h2>快捷操作</h2>
       <div class="button-group">
         <button id="openOptions" class="primary-btn">⚙️ 打开配置</button>
-        <button id="clearStats" class="secondary-btn">清除统计</button>
+      </div>
+    </div>
+
+    <div class="stats-section">
+      <h2>统计信息</h2>
+      <div class="stats-container">
+        <div class="stat-item">
+          <div class="stat-label">今日回复</div>
+          <div class="stat-value" id="todayReplyCount">0</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">累计回复</div>
+          <div class="stat-value" id="totalReplyCount">0</div>
+        </div>
+      </div>
+      <div class="button-group" style="margin-top: 15px;">
+        <button id="resetTotalCount" class="secondary-btn">🔄 重置累计</button>
       </div>
     </div>
 
@@ -43,9 +59,17 @@
         <ol>
           <li>点击"⚙️ 打开配置"按钮进行详细设置</li>
           <li>配置API密钥和AI角色</li>
-          <li>设置预置回复和跳过规则</li>
+          <li>设置单次最大回复数（无每日限制）</li>
+          <li>设置预置回复和本地回复规则</li>
           <li>返回此页面开启自动回复</li>
         </ol>
+        
+        <h3>功能说明：</h3>
+        <ul>
+          <li><strong>无每日限制</strong>：每日可回复数量无上限</li>
+          <li><strong>单次限制</strong>：每次刷新页面后最多回复设定数量</li>
+          <li><strong>统计信息</strong>：显示今日和累计回复数量</li>
+        </ul>
         
         <h3>日志窗口：</h3>
         <ul>

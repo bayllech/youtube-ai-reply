@@ -11,6 +11,7 @@ class YouTubeCommentMonitor {
     this.isScrolling = false;
     this.lastScrollTime = 0;
     this.scrollCheckInterval = null;
+    this.sessionReplyCount = 0; // 会话回复计数器
     
     this.init();
   }
@@ -18,11 +19,15 @@ class YouTubeCommentMonitor {
   async init() {
     // console.log('YouTube AI Reply content script loaded');
     
+    // 重置会话回复计数器
+    this.sessionReplyCount = 0;
+    
     // 初始化日志
     if (window.youtubeReplyLog) {
       window.youtubeReplyLog.info('=== 初始化 YouTube AI Reply ===');
       window.youtubeReplyLog.info('版本:', '1.0');
       window.youtubeReplyLog.info('页面URL:', window.location.href);
+      window.youtubeReplyLog.info('会话回复计数器已重置');
     } else {
       // console.log('youtubeReplyLog 未找到，日志功能不可用');
     }
@@ -55,6 +60,13 @@ class YouTubeCommentMonitor {
         // 复制设置，保持autoReplyEnabled的原始值
         this.settings = { ...response.settings };
         window.youtubeReplyLog?.info('设置已加载:', { autoReply: this.settings.autoReplyEnabled });
+        
+        // 初始化日志显示的最大回复数
+        if (window.youtubeReplyLog) {
+          const maxReplies = this.settings.maxRepliesPerSession || 10;
+          window.youtubeReplyLog.updateReplyCount(this.sessionReplyCount, maxReplies);
+        }
+        
         return true;
       } else {
         window.youtubeReplyLog?.warning('加载设置失败，使用默认设置');
@@ -66,6 +78,12 @@ class YouTubeCommentMonitor {
           replyStyle: 'friendly',
           maxRepliesPerSession: 10
         };
+        
+        // 初始化日志显示的最大回复数
+        if (window.youtubeReplyLog) {
+          window.youtubeReplyLog.updateReplyCount(this.sessionReplyCount, 10);
+        }
+        
         return false;
       }
     } catch (error) {
@@ -78,6 +96,12 @@ class YouTubeCommentMonitor {
         replyStyle: 'friendly',
         maxRepliesPerSession: 10
       };
+      
+      // 初始化日志显示的最大回复数
+      if (window.youtubeReplyLog) {
+        window.youtubeReplyLog.updateReplyCount(this.sessionReplyCount, 10);
+      }
+      
       return false;
     }
   }
@@ -85,7 +109,25 @@ class YouTubeCommentMonitor {
   listenForSettingsChanges() {
     chrome.storage.onChanged.addListener((changes, namespace) => {
       if (namespace === 'sync' && changes.settings) {
-        this.settings = changes.settings.newValue;
+        const oldSettings = changes.settings.oldValue;
+        const newSettings = changes.settings.newValue;
+        this.settings = newSettings;
+        
+        // 如果自动回复被关闭，重置会话计数
+        if (oldSettings && oldSettings.autoReplyEnabled && !newSettings.autoReplyEnabled) {
+          this.sessionReplyCount = 0;
+          window.youtubeReplyLog?.info('自动回复已关闭，重置会话计数');
+        }
+        
+        // 如果最大回复数设置有变化，更新显示
+        if (!oldSettings || oldSettings.maxRepliesPerSession !== newSettings.maxRepliesPerSession) {
+          const currentCount = this.sessionReplyCount;
+          const maxReplies = newSettings.maxRepliesPerSession || 10;
+          if (window.youtubeReplyLog) {
+            window.youtubeReplyLog.updateReplyCount(currentCount, maxReplies);
+          }
+        }
+        
         window.youtubeReplyLog?.info('设置已更新:', { autoReply: this.settings.autoReplyEnabled });
       }
     });
@@ -653,11 +695,8 @@ class YouTubeCommentMonitor {
 
     // Check reply limit
     if (this.settings?.maxRepliesPerSession) {
-      const today = new Date().toDateString();
-      const replyCount = await this.getTodayReplyCount();
-
-      if (replyCount >= this.settings.maxRepliesPerSession) {
-        window.youtubeReplyLog?.status('⛔ 已达到今日回复上限，停止自动回复');
+      if (this.sessionReplyCount >= this.settings.maxRepliesPerSession) {
+        window.youtubeReplyLog?.status('⛔ 已达到单次最大回复数，停止自动回复');
         this.stopAutoScroll();
         return false;
       }
@@ -692,16 +731,20 @@ class YouTubeCommentMonitor {
   }
 
   async incrementReplyCount() {
+    // 不再限制每日回复数量，只用于统计
     return new Promise((resolve) => {
       const today = new Date().toDateString();
-      chrome.storage.local.get(['replyCount'], (result) => {
+      chrome.storage.local.get(['replyCount', 'totalReplyCount'], (result) => {
         const countData = result.replyCount || {};
         countData[today] = (countData[today] || 0) + 1;
-        chrome.storage.local.set({ replyCount: countData }, () => {
-          // 更新显示
-          if (window.youtubeReplyLog && this.settings) {
-            window.youtubeReplyLog.updateReplyCount(countData[today], this.settings.maxRepliesPerSession || 10);
-          }
+        
+        // 更新累计回复数
+        const totalReplyCount = (result.totalReplyCount || 0) + 1;
+        
+        chrome.storage.local.set({ 
+          replyCount: countData,
+          totalReplyCount: totalReplyCount
+        }, () => {
           resolve();
         });
       });
@@ -710,15 +753,13 @@ class YouTubeCommentMonitor {
 
   async generateAndPostReply(comment) {
     try {
-      // 获取当前回复编号
-      const currentCount = await this.getTodayReplyCount();
-      const replyNumber = currentCount + 1;
-      const maxReplies = this.settings?.maxRepliesPerSession || 10;
+      // 获取当前回复编号（使用会话计数器）
+      const replyNumber = this.sessionReplyCount + 1;
       
       // 更新回复编号显示
       if (window.youtubeReplyLog) {
         window.youtubeReplyLog.setCurrentReplyNumber(replyNumber);
-        window.youtubeReplyLog.step(`📝 正在回复第 ${replyNumber}/${maxReplies} 条评论`);
+        window.youtubeReplyLog.step(`📝 正在回复第 ${replyNumber} 条评论`);
       }
       
       window.youtubeReplyLog?.processing('💭 正在生成回复内容...');
@@ -789,9 +830,12 @@ class YouTubeCommentMonitor {
 
       // Increment reply count and update display
       await this.incrementReplyCount();
-      const newCount = await this.getTodayReplyCount();
+      this.sessionReplyCount++; // 增加会话回复计数
+      
+      // 更新贴边按钮显示为会话计数器
       if (window.youtubeReplyLog) {
-        window.youtubeReplyLog.updateReplyCount(newCount, maxReplies);
+        const maxReplies = this.settings?.maxRepliesPerSession || 10;
+        window.youtubeReplyLog.updateReplyCount(this.sessionReplyCount, maxReplies);
       }
       
       window.youtubeReplyLog?.success(`🎉 第 ${replyNumber} 条回复完成！`);

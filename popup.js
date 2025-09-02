@@ -49,11 +49,11 @@ class PopupManager {
       });
     }
 
-    // Clear stats button
-    const clearStatsBtn = document.getElementById('clearStats');
-    if (clearStatsBtn) {
-      clearStatsBtn.addEventListener('click', () => {
-        this.clearStatistics();
+    // Reset total count button
+    const resetTotalBtn = document.getElementById('resetTotalCount');
+    if (resetTotalBtn) {
+      resetTotalBtn.addEventListener('click', () => {
+        this.resetTotalCount();
       });
     }
 
@@ -74,6 +74,9 @@ class PopupManager {
     if (autoReplyToggle) {
       autoReplyToggle.checked = this.settings.autoReplyEnabled || false;
     }
+    
+    // Update statistics
+    this.updateStatistics();
   }
 
   async updateSetting(key, value) {
@@ -116,6 +119,43 @@ class PopupManager {
     }
   }
 
+  async updateStatistics() {
+    try {
+      // Get reply counts from storage
+      const result = await chrome.storage.local.get(['replyCount', 'totalReplyCount']);
+      const replyCount = result.replyCount || {};
+      const totalReplyCount = result.totalReplyCount || 0;
+      
+      // Calculate today's count
+      const today = new Date().toDateString();
+      const todayCount = replyCount[today] || 0;
+      
+      // Update UI
+      const todayElement = document.getElementById('todayReplyCount');
+      const totalElement = document.getElementById('totalReplyCount');
+      
+      if (todayElement) {
+        todayElement.textContent = todayCount;
+      }
+      if (totalElement) {
+        totalElement.textContent = totalReplyCount;
+      }
+    } catch (error) {
+      console.error('Error updating statistics:', error);
+    }
+  }
+
+  async resetTotalCount() {
+    try {
+      await chrome.storage.local.set({ totalReplyCount: 0 });
+      this.updateStatistics();
+      this.showNotification('累计回复数已重置', 'success');
+    } catch (error) {
+      console.error('Error resetting total count:', error);
+      this.showNotification('重置失败', 'error');
+    }
+  }
+
   showNotification(message, type = 'info') {
     const notification = document.getElementById('notification');
     const notificationText = document.getElementById('notificationText');
@@ -138,7 +178,7 @@ class PopupManager {
   forceVisibility() {
     // Force container and all sections to be visible
     const container = document.querySelector('.container');
-    const sections = document.querySelectorAll('.settings-section, .actions-section, .help-section');
+    const sections = document.querySelectorAll('.settings-section, .actions-section, .stats-section, .help-section');
     
     if (container) {
       container.style.display = 'block';

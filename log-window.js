@@ -509,10 +509,12 @@ class FloatingLogWindow {
         this.maxReplies = max;
         const countElement = this.indicator.querySelector('.reply-count');
         if (countElement) {
-            countElement.textContent = `${count}/${max}`;
+            // 如果max为null，使用默认值10
+            const displayMax = max || 10;
+            countElement.textContent = `${count}/${displayMax}`;
             
             // 根据进度改变颜色
-            const ratio = count / max;
+            const ratio = count / displayMax;
             if (ratio >= 1) {
                 countElement.style.background = 'rgba(244, 67, 54, 0.8)';
             } else if (ratio >= 0.8) {
