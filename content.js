@@ -8,6 +8,9 @@ class YouTubeCommentMonitor {
     this.isProcessing = false;
     this.settings = null;
     this.lastProcessedTexts = new Map(); // Track recently processed texts by position
+    this.isScrolling = false;
+    this.lastScrollTime = 0;
+    this.scrollCheckInterval = null;
     
     this.init();
   }
@@ -30,6 +33,9 @@ class YouTubeCommentMonitor {
     
     // Listen for settings changes
     this.listenForSettingsChanges();
+    
+    // Setup scroll detection logging
+    this.setupScrollDetection();
   }
 
   async loadSettings() {
@@ -165,6 +171,9 @@ class YouTubeCommentMonitor {
     console.log('Comment observer started');
     // Process existing comments
     this.processExistingComments();
+    
+    // Start auto-scroll to load more comments
+    this.startAutoScroll();
   }
 
   isCommentElement(element) {
@@ -301,6 +310,11 @@ class YouTubeCommentMonitor {
       // Get comment ID to avoid duplicates
       const commentId = this.getCommentId(commentElement);
       
+      // Skip if this is a reply
+      if (commentId === 'reply_skip') {
+        return;
+      }
+      
       // Check if we've already processed this comment
       if (this.processedComments.has(commentId)) {
         console.log(`Comment ${commentId} already processed, skipping`);
@@ -345,11 +359,19 @@ class YouTubeCommentMonitor {
         return `error_${Date.now()}`;
       }
       
-      // Try to get a unique identifier from the comment container
+      // Check if this is a reply (has is-reply attribute or is in reply section)
       const comment = commentElement.closest('#comment') || 
                      commentElement.closest('ytcp-comment') ||
                      commentElement.closest('ytd-comment-thread-renderer') ||
                      commentElement.closest('ytd-comment-renderer');
+      
+      // Skip if this is a reply
+      if (comment && (comment.hasAttribute('is-reply') || 
+                     comment.closest('.comment-thread-replies') ||
+                     comment.closest('ytcp-comment-replies'))) {
+        console.log('Skipping reply element');
+        return 'reply_skip';
+      }
       
       if (comment) {
         // Try to get a stable ID from the comment element
@@ -482,7 +504,7 @@ class YouTubeCommentMonitor {
         return;
       }
 
-      // Look for the like button using the correct ID and structure
+      // Click the like button
       const likeButton = commentContainer.querySelector('#like-button ytcp-icon-button') ||
                         commentContainer.querySelector('#like-button button') ||
                         commentContainer.querySelector('ytcp-comment-toggle-button#like-button ytcp-icon-button');
@@ -493,12 +515,23 @@ class YouTubeCommentMonitor {
         console.log('Like button clicked successfully');
       } else {
         console.log('Like button not found');
-        // Debug: log available buttons
-        const buttons = commentContainer.querySelectorAll('button, ytcp-icon-button');
-        console.log('Available buttons:', Array.from(buttons).map(b => b.getAttribute('aria-label') || 'no label'));
       }
+
+      // Also click the creator heart button
+      const heartButton = commentContainer.querySelector('#creator-heart-button ytcp-icon-button') ||
+                         commentContainer.querySelector('#creator-heart-button button') ||
+                         commentContainer.querySelector('#creator-heart #creator-heart-button');
+      
+      if (heartButton) {
+        console.log('Found creator heart button, clicking...');
+        heartButton.click();
+        console.log('Creator heart button clicked successfully');
+      } else {
+        console.log('Creator heart button not found');
+      }
+
     } catch (error) {
-      console.error('Error clicking like button:', error);
+      console.error('Error clicking buttons:', error);
     }
   }
 
@@ -589,6 +622,7 @@ class YouTubeCommentMonitor {
     // Check if auto-reply is enabled
     if (!this.settings?.autoReplyEnabled) {
       console.log('Auto-reply is disabled');
+      this.stopAutoScroll();
       return false;
     }
 
@@ -599,6 +633,7 @@ class YouTubeCommentMonitor {
       console.log(`Today's reply count: ${replyCount}, max: ${this.settings.maxRepliesPerSession}`);
       if (replyCount >= this.settings.maxRepliesPerSession) {
         console.log('Maximum replies reached for today');
+        this.stopAutoScroll();
         return false;
       }
     }
@@ -1087,13 +1122,311 @@ class YouTubeCommentMonitor {
     }
   }
 
+  async startAutoScroll() {
+    console.log('Starting auto-scroll to load more comments...');
+    
+    // Check if we're already scrolling
+    if (this.isScrolling) {
+      return;
+    }
+    
+    this.isScrolling = true;
+    // Set lastScrollTime to 0 to allow immediate first scroll
+    this.lastScrollTime = 0;
+    this.scrollCheckInterval = setInterval(() => {
+      this.checkAndScroll();
+    }, 3000); // Check every 3 seconds
+    
+    // Also trigger an immediate scroll check after a short delay
+    setTimeout(() => {
+      this.checkAndScroll();
+    }, 1000);
+  }
+
+  checkAndScroll() {
+    try {
+      console.log('checkAndScroll called - isProcessing:', this.isProcessing, 'lastScrollTime:', this.lastScrollTime);
+      
+      // Don't scroll if we're currently processing replies
+      if (this.isProcessing) {
+        console.log('Skipping scroll - currently processing replies');
+        return;
+      }
+      
+      // Check if we've reached the reply limit
+      if (this.settings?.maxRepliesPerSession) {
+        const today = new Date().toDateString();
+        // We can't easily get the current count without async, so we'll just check the setting
+        // The scrolling will be stopped when limit is reached in shouldReplyToComment
+      }
+
+      const now = Date.now();
+      // Only scroll if it's been at least 5 seconds since the last scroll
+      if (now - this.lastScrollTime < 5000) {
+        console.log('Skipping scroll - too soon since last scroll');
+        return;
+      }
+      
+      console.log('Proceeding with scroll check...');
+      
+      // Track if we've scrolled before to detect new content
+      if (this.lastScrollHeight && this.activitySection) {
+        const currentHeight = this.activitySection.scrollHeight;
+        if (currentHeight > this.lastScrollHeight) {
+          console.log('New content detected - height increased from', this.lastScrollHeight, 'to', currentHeight);
+          // Reset scroll position to continue scrolling
+          this.lastScrollHeight = currentHeight;
+        }
+      }
+
+      // Check if we need to scroll (look for various load more buttons)
+      const loadMoreButton = document.querySelector('ytcp-button[aria-label*="Load more"], button[aria-label*="Load more"], ytcp-button[aria-label*="加载更多"], ytcp-button[aria-label*="更多"], button[aria-label*="更多"]');
+      
+      if (loadMoreButton) {
+        console.log('Found Load More button, clicking...');
+        loadMoreButton.click();
+        this.lastScrollTime = now;
+        return;
+      }
+
+      // Try to find and click any "Show more replies" buttons
+      const showMoreButtons = document.querySelectorAll('ytcp-button[aria-label*="Show more replies"], button[aria-label*="Show more replies"], ytcp-button[aria-label*="显示更多回复"], ytcp-button[aria-label*="更多回复"]');
+      if (showMoreButtons.length > 0) {
+        console.log(`Found ${showMoreButtons.length} "Show more replies" buttons`);
+        showMoreButtons.forEach(button => {
+          if (!button.clicked) {
+            button.click();
+            button.clicked = true;
+            console.log('Clicked "Show more replies" button');
+          }
+        });
+        this.lastScrollTime = now;
+        return;
+      }
+
+      // Check if we're at the bottom - prioritize YTCP-ACTIVITY-SECTION container
+      let scrollContainer = null;
+      let scrollTop = 0;
+      let scrollHeight = 0;
+      let clientHeight = 0;
+      
+      // First try YTCP-ACTIVITY-SECTION (YouTube Studio's main scroll container)
+      const activitySection = document.querySelector('ytcp-activity-section');
+      if (activitySection && activitySection.scrollHeight > activitySection.clientHeight) {
+        scrollContainer = activitySection;
+        scrollTop = activitySection.scrollTop;
+        scrollHeight = activitySection.scrollHeight;
+        clientHeight = activitySection.clientHeight;
+        this.activitySection = activitySection;
+        console.log('Using YTCP-ACTIVITY-SECTION container:', { scrollTop, scrollHeight, clientHeight, bottom: scrollTop + clientHeight });
+      } else {
+        // Fallback to other containers
+        const containers = [
+          document.querySelector('#primary-inner'),
+          document.querySelector('#primary'),
+          document.querySelector('#comments'),
+          document.querySelector('ytd-comments'),
+          document.querySelector('.ytcp-app'),
+          document.querySelector('body'),
+          document.documentElement
+        ];
+        
+        // Debug: log all potential containers
+        console.log('Checking scroll containers:');
+        containers.forEach((container, index) => {
+          if (container) {
+            console.log(`Container ${index}:`, container.tagName + (container.id ? '#' + container.id : '') + (container.className ? '.' + container.className.split(' ').join('.') : ''), {
+              scrollHeight: container.scrollHeight,
+              clientHeight: container.clientHeight,
+              scrollTop: container.scrollTop,
+              isScrollable: container.scrollHeight > container.clientHeight
+            });
+          }
+        });
+        
+        for (const container of containers) {
+          if (container && container.scrollHeight > container.clientHeight) {
+            scrollContainer = container;
+            scrollTop = container.scrollTop;
+            scrollHeight = container.scrollHeight;
+            clientHeight = container.clientHeight;
+            console.log('Found scroll container:', container.tagName + (container.id ? '#' + container.id : ''), 
+                        { scrollTop, scrollHeight, clientHeight, bottom: scrollTop + clientHeight });
+            break;
+          }
+        }
+      }
+      
+      // If no scrollable container found, use window
+      if (!scrollContainer) {
+        scrollTop = window.scrollY;
+        scrollHeight = document.documentElement.scrollHeight;
+        clientHeight = window.innerHeight;
+        scrollContainer = window;
+        console.log('Using window scroll:', { scrollTop, scrollHeight, clientHeight, bottom: scrollTop + clientHeight });
+      }
+      
+      // If we're near the bottom or if we haven't scrolled much, scroll down
+      const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
+      console.log('Distance from bottom:', distanceFromBottom);
+      
+      if (distanceFromBottom < 1500 || scrollTop < 500) {
+        if (scrollContainer === window) {
+          window.scrollBy(0, 1000);
+        } else {
+          scrollContainer.scrollTop += 1000;
+        }
+        this.lastScrollTime = now;
+        this.lastScrollHeight = scrollHeight;
+        console.log('Scrolled down to load more comments');
+        return;
+      }
+      
+      console.log('No scroll action needed at this time');
+    } catch (error) {
+      console.error('Error in auto-scroll:', error);
+    }
+  }
+
+  stopAutoScroll() {
+    if (this.scrollCheckInterval) {
+      clearInterval(this.scrollCheckInterval);
+      this.scrollCheckInterval = null;
+    }
+    this.isScrolling = false;
+    console.log('Auto-scroll stopped');
+  }
+
   sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  // Setup scroll detection to understand YouTube Studio scrolling
+  setupScrollDetection() {
+    console.log('Setting up scroll detection...');
+    
+    // Monitor scroll events with capture phase
+    const scrollTargets = [
+      window,
+      document,
+      document.documentElement,
+      document.body,
+      document.querySelector('#primary-inner'),
+      document.querySelector('#primary'),
+      document.querySelector('#comments'),
+      document.querySelector('#primary ytd-item-section-renderer'),
+      document.querySelector('.ytcp-app'),
+      document.querySelector('ytd-app')
+    ].filter(Boolean);
+    
+    console.log('Scroll targets:', scrollTargets.map(t => t?.tagName + (t?.id ? '#' + t?.id : '') + (t?.className ? '.' + t?.className.split(' ').join('.') : '')));
+    
+    scrollTargets.forEach(target => {
+      if (!target) return;
+      
+      // Use capture phase and passive: false
+      target.addEventListener('scroll', (event) => {
+        console.log('=== SCROLL DETECTED ===');
+        const element = event.target;
+        console.log('Target:', element);
+        console.log('Element info:', {
+          tagName: element.tagName,
+          id: element.id,
+          className: element.className,
+          scrollTop: element.scrollTop,
+          scrollHeight: element.scrollHeight,
+          clientHeight: element.clientHeight,
+          windowScrollY: window.scrollY,
+          windowScrollHeight: document.documentElement.scrollHeight,
+          windowClientHeight: window.innerHeight
+        });
+        
+        // Check for new comments after scroll
+        setTimeout(() => {
+          this.checkForNewCommentsAfterScroll();
+        }, 1000);
+      }, { capture: true, passive: false });
+    });
+    
+    // Also monitor wheel events with more details
+    document.addEventListener('wheel', (event) => {
+      console.log('=== WHEEL EVENT ===');
+      console.log('Wheel details:', {
+        deltaY: event.deltaY,
+        deltaX: event.deltaX,
+        target: event.target,
+        currentTarget: event.currentTarget,
+        path: event.composedPath().map(el => el?.tagName + (el?.id ? '#' + el?.id : '') + (el?.className ? '.' + el?.className.split(' ').join('.') : '')).slice(0, 5)
+      });
+    }, { capture: true, passive: false });
+    
+    // Also monitor touch events for mobile
+    document.addEventListener('touchmove', (event) => {
+      console.log('=== TOUCH MOVE ===');
+    }, { capture: true, passive: false });
+    
+    // Monitor scroll on the whole document with timeout
+    let lastScrollTop = window.scrollY;
+    setInterval(() => {
+      const currentScrollTop = window.scrollY;
+      if (currentScrollTop !== lastScrollTop) {
+        console.log('Scroll change detected:', { lastScrollTop, currentScrollTop, diff: currentScrollTop - lastScrollTop });
+        lastScrollTop = currentScrollTop;
+        this.checkForNewCommentsAfterScroll();
+      }
+    }, 100);
+  }
+  
+  checkForNewCommentsAfterScroll() {
+    console.log('=== CHECKING FOR NEW COMMENTS AFTER SCROLL ===');
+    
+    // Check document dimensions
+    console.log('Document dimensions:', {
+      scrollHeight: document.documentElement.scrollHeight,
+      scrollY: window.scrollY,
+      innerHeight: window.innerHeight
+    });
+    
+    const existingComments = document.querySelectorAll('ytd-comment-thread-renderer #content-text, ytd-comment-renderer #content-text, ytcp-comment #content-text, #content-text.yt-core-attributed-string');
+    console.log('Comments after scroll:', existingComments.length);
+    
+    // Check all visible buttons
+    const allButtons = document.querySelectorAll('button, ytcp-button');
+    const loadMoreButtons = Array.from(allButtons).filter(btn => {
+      const label = btn.getAttribute('aria-label') || btn.textContent || '';
+      return label.toLowerCase().includes('load more') || 
+             label.toLowerCase().includes('加载更多') || 
+             label.toLowerCase().includes('更多');
+    });
+    
+    const showMoreButtons = Array.from(allButtons).filter(btn => {
+      const label = btn.getAttribute('aria-label') || btn.textContent || '';
+      return label.toLowerCase().includes('show more') || 
+             label.toLowerCase().includes('显示更多') || 
+             label.toLowerCase().includes('更多回复');
+    });
+    
+    console.log('All buttons found:', allButtons.length);
+    console.log('Load more buttons:', loadMoreButtons.length, loadMoreButtons.map(b => b.getAttribute('aria-label')));
+    console.log('Show more buttons:', showMoreButtons.length, showMoreButtons.map(b => b.getAttribute('aria-label')));
+    
+    // Check if there are any elements with 'loading' text
+    const loadingElements = document.querySelectorAll('*');
+    const loadingTexts = Array.from(loadingElements).filter(el => {
+      const text = el.textContent || '';
+      return text.toLowerCase().includes('loading') || 
+             text.toLowerCase().includes('加载') || 
+             text.toLowerCase().includes('加载中');
+    });
+    
+    if (loadingTexts.length > 0) {
+      console.log('Loading elements found:', loadingTexts.length, loadingTexts.slice(0, 3).map(el => el.textContent));
+    }
   }
 }
 
 // Add more debugging information
-console.log('YouTube AI Reply content script loading...');
+console.log('YouTube AI Reply content script loading... v2.1');
 
 // Initialize the comment monitor
 const commentMonitor = new YouTubeCommentMonitor();
