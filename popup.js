@@ -181,8 +181,8 @@ class PopupManager {
       return;
     }
 
-    // Basic validation (Gemini API keys typically start with 'AIza')
-    if (!apiKey.startsWith('AIza')) {
+    // Basic validation for Zhipu AI API key (should not be empty)
+    if (apiKey.length < 10) {
       this.showNotification('API密钥格式不正确', 'error');
       return;
     }
@@ -296,21 +296,10 @@ class PopupManager {
       return;
     }
 
-    try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro?key=${this.settings.apiKey}`, {
-        method: 'GET'
-      });
-
-      if (response.ok) {
-        apiStatus.textContent = '正常';
-        apiStatus.className = 'status-value success';
-      } else {
-        throw new Error('API key invalid');
-      }
-    } catch (error) {
-      apiStatus.textContent = '错误';
-      apiStatus.className = 'status-value error';
-    }
+    // For Zhipu AI, we can't easily check API key validity without making a full request
+    // So we'll just show "已配置" when API key exists
+    apiStatus.textContent = '已配置';
+    apiStatus.className = 'status-value success';
   }
 
   showNotification(message, type = 'info') {

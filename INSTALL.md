@@ -10,9 +10,9 @@ cd youtube-ai-reply
 ```
 
 ### 2. 获取 API 密钥
-1. 访问 [Google AI Studio](https://makersuite.google.com/app/apikey)
-2. 使用 Google 账户登录
-3. 点击 "Create API Key"
+1. 访问 [智谱清言开放平台](https://open.bigmodel.cn/)
+2. 注册并登录账户
+3. 创建新的API密钥
 4. 复制生成的 API 密钥
 
 ### 3. 安装到 Chrome
@@ -24,7 +24,7 @@ cd youtube-ai-reply
 
 ### 4. 配置扩展
 1. 点击 Chrome 工具栏中的扩展图标 🤖
-2. 粘贴你的 Gemini API 密钥
+2. 粘贴你的 智谱清言 API 密钥
 3. 点击 "保存" 按钮
 4. 选择回复风格和其他设置
 5. 启用 "自动回复" 功能
@@ -32,7 +32,7 @@ cd youtube-ai-reply
 ## 🎯 使用方法
 
 ### 基本设置
-- **API 密钥**: 必须填入有效的 Gemini API 密钥
+- **API 密钥**: 必须填入有效的 智谱清言 API 密钥
 - **回复风格**: 选择合适的回复风格（建议先使用"友好型"）
 - **回复延迟**: 建议 3000-5000 毫秒（3-5秒）
 - **每日回复数**: 建议 10-20 条，避免过度使用
@@ -58,7 +58,7 @@ cd youtube-ai-reply
 - 查看 Console 日志（F12）
 
 **Q: API 测试失败？**
-- 验证 API 密钥是否有效
+- 验证 智谱清言 API 密钥是否有效
 - 检查网络连接
 - 确认 API 配额是否充足
 

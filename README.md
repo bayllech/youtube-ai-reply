@@ -1,11 +1,11 @@
 # YouTube AI Auto Reply - Chrome扩展
 
-一个智能的Chrome浏览器扩展，可以自动使用Gemini AI来回复YouTube视频评论。
+一个智能的Chrome浏览器扩展，可以自动使用智谱清言AI来回复YouTube视频评论。
 
 ## 功能特点
 
 - 🔍 **智能评论检测**: 自动检测YouTube视频页面上的新评论
-- 🤖 **AI智能回复**: 使用Google Gemini AI生成自然、相关的回复
+- 🤖 **AI智能回复**: 使用智谱清言AI生成自然、相关的回复
 - ⚙️ **灵活配置**: 支持多种回复风格和自定义设置
 - 📊 **统计监控**: 实时显示今日回复数和API状态
 - 🛡️ **安全可靠**: API密钥本地存储，不会上传到服务器
@@ -18,9 +18,9 @@
    cd youtube-ai-reply
    ```
 
-2. **获取Gemini API密钥**
-   - 访问 [Google AI Studio](https://makersuite.google.com/app/apikey)
-   - 登录你的Google账户
+2. **获取智谱清言API密钥**
+   - 访问 [智谱清言开放平台](https://open.bigmodel.cn/)
+   - 注册并登录账户
    - 创建新的API密钥
    - 复制生成的API密钥
 
@@ -41,7 +41,7 @@
 
 ### 基本设置
 
-1. **API密钥配置**: 输入你在Google AI Studio获取的API密钥
+1. **API密钥配置**: 输入你在智谱清言开放平台获取的API密钥
 2. **回复风格选择**:
    - 友好型: 亲切、礼貌的回复
    - 专业型: 正式、专业的回复

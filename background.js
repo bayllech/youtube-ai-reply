@@ -22,7 +22,7 @@ class YouTubeAIReply {
     }
   }
 
-  // Generate AI reply using Gemini API
+  // Generate AI reply using Zhipu AI API
   async generateReply(commentText, replyStyle = 'friendly') {
     try {
       const settings = await chrome.storage.sync.get(['settings']);
@@ -34,17 +34,20 @@ class YouTubeAIReply {
 
       const prompt = this.buildPrompt(commentText, replyStyle);
       
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`, {
+      const response = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
         method: 'POST',
         headers: {
+          'Authorization': apiKey,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: prompt
-            }]
-          }]
+          model: "glm-4.5-air",
+          messages: [
+            {
+              role: "user",
+              content: prompt
+            }
+          ]
         })
       });
 
@@ -54,7 +57,7 @@ class YouTubeAIReply {
         throw new Error(data.error.message);
       }
 
-      const reply = data.candidates[0].content.parts[0].text;
+      const reply = data.choices[0].message.content;
       return reply.trim();
 
     } catch (error) {
