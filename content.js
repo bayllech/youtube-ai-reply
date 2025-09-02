@@ -256,6 +256,18 @@ class YouTubeCommentMonitor {
         return;
       }
 
+      // Check if we should skip this comment (short words, etc.)
+      if (this.shouldSkipComment(commentText)) {
+        console.log('Skipping comment (too short or simple):', commentText.substring(0, 50));
+        return;
+      }
+
+      // Check if this is an emoji-heavy comment
+      if (this.isEmojiHeavy(commentText)) {
+        console.log('Emoji-heavy comment detected, will use emoji reply');
+        // Don't return here, we'll handle it in the reply generation
+      }
+
       // Get the position of the comment for better duplicate detection
       const position = this.getElementPosition(commentElement);
       
@@ -404,6 +416,92 @@ class YouTubeCommentMonitor {
     return ownReplyPatterns.some(pattern => text.includes(pattern));
   }
 
+  isEmojiHeavy(text) {
+    // Remove all emojis and check what's left
+    const emojiRegex = /[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F900}-\u{1F9FF}]|[\u{1F018}-\u{1F270}]|[\u{238C}]|[\u{2020}]|[\u{2B06}]|[\u{2197}-\u{2199}]|[\u{21A9}-\u{21AA}]|[\u{2934}-\u{2935}]|[\u{2B05}-\u{2B07}]|[\u{2B1B}-\u{2B1C}]|[\u{3297}]|[\u{3299}]|[\u{3030}]|[\u{2B50}]|[\u{2B55}]/gu;
+    const textWithoutEmojis = text.replace(emojiRegex, '').trim();
+    
+    // If more than 50% of the comment is emojis or it's mostly emojis
+    const emojiCount = (text.match(emojiRegex) || []).length;
+    const totalLength = text.length;
+    
+    return emojiCount > 0 && (textWithoutEmojis.length < totalLength * 0.5 || emojiCount >= 3);
+  }
+
+  generateEmojiReply() {
+    // Return positive emojis for emoji-heavy comments
+    const emojiReplies = [
+      '❤️❤️❤️',
+      '🎉🎉🎉',
+      '🙏🙏🙏',
+      '💕💕💕',
+      '😊😊😊',
+      '👍👍👍',
+      '🌟🌟🌟',
+      '💖💖💖',
+      '😄😄😄',
+      '🎊🎊🎊'
+    ];
+    return emojiReplies[Math.floor(Math.random() * emojiReplies.length)];
+  }
+
+  shouldSkipComment(text) {
+    // Skip very short comments that are just exclamations or single words
+    const skipPatterns = [
+      /^[a-zA-Z]{1,3}$/,  // Single words like "Wow", "AI", "ia", etc.
+      /^[!?.,]{1,5}$/,    // Just punctuation
+      /^(lol|wow|omg|wtf|idk|btw|imho)$/i,  // Common short acronyms
+      /^(yes|no|ok|okay|nice|good|bad|cool)$/i,  // Simple reactions
+      /^[ha]{2,}$/,       // Laughter like "haha"
+      /^\s*$/            // Empty or whitespace only
+    ];
+    
+    const trimmedText = text.trim();
+    
+    // Skip if text is less than 4 characters (after trimming)
+    if (trimmedText.length < 4) {
+      return true;
+    }
+    
+    // Check against skip patterns
+    for (const pattern of skipPatterns) {
+      if (pattern.test(trimmedText)) {
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
+  async clickLikeButton(commentElement) {
+    try {
+      // Find the like button within the comment
+      const commentContainer = commentElement.closest('ytcp-comment');
+      if (!commentContainer) {
+        console.log('Comment container not found for like button');
+        return;
+      }
+
+      // Look for the like button using the correct ID and structure
+      const likeButton = commentContainer.querySelector('#like-button ytcp-icon-button') ||
+                        commentContainer.querySelector('#like-button button') ||
+                        commentContainer.querySelector('ytcp-comment-toggle-button#like-button ytcp-icon-button');
+      
+      if (likeButton) {
+        console.log('Found like button, clicking...');
+        likeButton.click();
+        console.log('Like button clicked successfully');
+      } else {
+        console.log('Like button not found');
+        // Debug: log available buttons
+        const buttons = commentContainer.querySelectorAll('button, ytcp-icon-button');
+        console.log('Available buttons:', Array.from(buttons).map(b => b.getAttribute('aria-label') || 'no label'));
+      }
+    } catch (error) {
+      console.error('Error clicking like button:', error);
+    }
+  }
+
   extractCommentText(commentElement) {
     try {
       console.log('Attempting to extract comment text from element:', commentElement);
@@ -548,22 +646,33 @@ class YouTubeCommentMonitor {
     try {
       console.log('Generating reply for:', comment.commentText.substring(0, 50) + '...');
 
-      // Generate AI reply
-      const response = await chrome.runtime.sendMessage({
-        action: 'generateReply',
-        commentText: comment.commentText,
-        replyStyle: this.settings?.replyStyle || 'friendly'
-      });
+      let replyText;
+      
+      // Check if this is an emoji-heavy comment and use emoji reply
+      if (this.isEmojiHeavy(comment.commentText)) {
+        replyText = this.generateEmojiReply();
+        console.log('Generated emoji reply:', replyText);
+      } else {
+        // Generate AI reply for regular comments
+        const response = await chrome.runtime.sendMessage({
+          action: 'generateReply',
+          commentText: comment.commentText,
+          replyStyle: this.settings?.replyStyle || 'friendly'
+        });
 
-      if (!response.success) {
-        throw new Error(response.error);
+        if (!response.success) {
+          throw new Error(response.error);
+        }
+
+        replyText = response.reply;
+        console.log('Generated AI reply:', replyText);
       }
-
-      const replyText = response.reply;
-      console.log('Generated reply:', replyText);
 
       // Post the reply
       await this.postReply(comment.element, replyText);
+
+      // Click the like button for the comment
+      await this.clickLikeButton(comment.element);
 
       // Increment reply count
       await this.incrementReplyCount();

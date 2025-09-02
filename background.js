@@ -68,17 +68,17 @@ class YouTubeAIReply {
 
   buildPrompt(commentText, style) {
     const stylePrompts = {
-      friendly: '请以友好、礼貌的方式回复这个YouTube评论。回复要自然、有帮助性，并且要简短。',
-      professional: '请以专业、正式的方式回复这个YouTube评论。回复要有建设性，体现专业性。',
-      casual: '请以轻松、随意的方式回复这个YouTube评论。回复要自然、口语化。',
-      humorous: '请以幽默的方式回复这个YouTube评论。回复要风趣但不冒犯人。'
+      friendly: 'Please reply to this YouTube comment in a friendly and polite way. Keep your reply natural, helpful, and very short (under 20 words). Reply in English only.',
+      professional: 'Please reply to this YouTube comment in a professional and formal way. Keep your reply constructive and professional. Keep it very short (under 20 words). Reply in English only.',
+      casual: 'Please reply to this YouTube comment in a casual and relaxed way. Keep your reply natural and conversational. Keep it very short (under 20 words). Reply in English only.',
+      humorous: 'Please reply to this YouTube comment in a humorous way. Keep your reply witty but not offensive. Keep it very short (under 20 words). Reply in English only.'
     };
 
     return `${stylePrompts[style] || stylePrompts.friendly}
 
-原评论: "${commentText}"
+Original comment: "${commentText}"
 
-请只回复回复内容，不要添加任何其他文字。`;
+Please reply with the response content only, in English, and keep it very short. Do not add any other text.`;
   }
 
   // Check if auto-reply is enabled
