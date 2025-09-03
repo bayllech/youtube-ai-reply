@@ -246,6 +246,9 @@ class YouTubeCommentMonitor {
     // Setup scroll detection logging
     this.setupScrollDetection();
     
+    // Setup detailed scroll monitoring for debugging
+    this.setupDetailedScrollMonitoring();
+    
     // Setup activity monitoring will be called after init
     setTimeout(() => {
       this.setupActivityMonitoring();
@@ -1928,6 +1931,24 @@ class YouTubeCommentMonitor {
         return;
       }
       
+      // 获取正确的滚动容器
+      const scrollContainer = this.findScrollContainer();
+      if (!scrollContainer) {
+        return;
+      }
+      
+      // 获取滚动位置信息
+      let scrollTop, scrollHeight, clientHeight;
+      if (scrollContainer === window) {
+        scrollTop = window.scrollY || document.documentElement.scrollTop;
+        scrollHeight = document.documentElement.scrollHeight;
+        clientHeight = window.innerHeight;
+      } else {
+        scrollTop = scrollContainer.scrollTop;
+        scrollHeight = scrollContainer.scrollHeight;
+        clientHeight = scrollContainer.clientHeight;
+      }
+      
       // 首先查找"加载更多"按钮
       const loadMoreButton = document.querySelector(
         'ytcp-button[aria-label*="Load more"], ' +
@@ -1944,41 +1965,25 @@ class YouTubeCommentMonitor {
         return;
       }
       
-      // 检查是否需要滚动以加载更多评论
-      const scrollContainer = this.findScrollContainer();
-      if (!scrollContainer) {
-        return;
-      }
-      
-      const scrollTop = scrollContainer.scrollTop || window.scrollY;
-      const scrollHeight = scrollContainer.scrollHeight || document.documentElement.scrollHeight;
-      const clientHeight = scrollContainer.clientHeight || window.innerHeight;
-      
       const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
       
       // 如果距离底部超过1000px，则向下滚动
       if (distanceFromBottom > 1000) {
         const scrollAmount = Math.min(600, distanceFromBottom / 2);
+        const targetScroll = scrollTop + scrollAmount;
         
+        // 使用直接设置scrollTop而不是smooth滚动，更可靠
         if (scrollContainer === window) {
-          window.scrollTo({
-            top: scrollTop + scrollAmount,
-            behavior: 'smooth'
-          });
+          window.scrollTo(0, targetScroll);
         } else {
-          scrollContainer.scrollTo({
-            top: scrollTop + scrollAmount,
-            behavior: 'smooth'
-          });
+          scrollContainer.scrollTop = targetScroll;
         }
         
         this.lastScrollTime = now;
         window.youtubeReplyLog?.debug(`自动向下滚动 ${scrollAmount}px，距离底部 ${distanceFromBottom}px`);
         
-        // 滚动后不再立即检查新评论，避免无限循环
-        // 系统会通过滚动事件监听器自动检测新评论
+        // 滚动后检查新评论
         setTimeout(() => {
-          // 不再主动调用 processExistingComments，让滚动事件监听器处理
           this.checkForNewCommentsAfterScroll();
         }, 3000);
       } else {
@@ -1991,7 +1996,7 @@ class YouTubeCommentMonitor {
   }
   
   findScrollContainer() {
-    // 查找主要的滚动容器
+    // 查找主要的滚动容器 - 优先使用ytcp-activity-section
     const containers = [
       document.querySelector('ytcp-activity-section'),
       document.querySelector('#primary-inner'),
@@ -2002,10 +2007,12 @@ class YouTubeCommentMonitor {
     
     for (const container of containers) {
       if (container && container.scrollHeight > container.clientHeight) {
+        console.log(`🎯 找到滚动容器: ${container.tagName.toLowerCase()}, 高度: ${container.scrollHeight}px`);
         return container;
       }
     }
     
+    console.log('⚠️ 未找到合适的滚动容器，使用window');
     return window;
   }
 
@@ -2035,7 +2042,8 @@ class YouTubeCommentMonitor {
       document.querySelector('#comments'),
       document.querySelector('#primary ytd-item-section-renderer'),
       document.querySelector('.ytcp-app'),
-      document.querySelector('ytd-app')
+      document.querySelector('ytd-app'),
+      document.querySelector('ytcp-activity-section')  // 关键：添加实际的滚动容器
     ].filter(Boolean);
     
     scrollTargets.forEach(target => {
@@ -2048,6 +2056,30 @@ class YouTubeCommentMonitor {
           this.checkForNewCommentsAfterScroll();
         }, 500);
       }, { capture: true, passive: true });
+    });
+  }
+  
+  // 简化的滚动监测方法 - 专注于关键信息
+  setupDetailedScrollMonitoring() {
+    console.log('🔍 滚动监测已启动 - 修复版本');
+    
+    // 监听主要的滚动容器
+    const mainContainer = document.querySelector('ytcp-activity-section');
+    if (mainContainer) {
+      mainContainer.addEventListener('scroll', (event) => {
+        const scrollTop = mainContainer.scrollTop;
+        const scrollHeight = mainContainer.scrollHeight;
+        const clientHeight = mainContainer.clientHeight;
+        const scrollPercent = Math.round((scrollTop / (scrollHeight - clientHeight)) * 100);
+        
+        console.log(`📜 主容器滚动: ${scrollTop}px / ${scrollHeight}px (${scrollPercent}%)`);
+      });
+    }
+    
+    // 监听window滚动（作为备用）
+    window.addEventListener('scroll', (event) => {
+      const scrollTop = window.scrollY || document.documentElement.scrollTop;
+      console.log(`📜 Window滚动: ${scrollTop}px`);
     });
   }
   
@@ -2283,39 +2315,26 @@ YouTubeCommentMonitor.prototype.scrollDownAfterReply = async function() {
     // 等待一下确保回复已经完全提交
     await this.sleep(1000);
     
+    // 获取正确的滚动容器
+    const scrollContainer = this.findScrollContainer();
+    
     // 获取当前滚动位置
-    const currentScroll = window.scrollY || document.documentElement.scrollTop;
+    let currentScroll;
+    if (scrollContainer === window) {
+      currentScroll = window.scrollY || document.documentElement.scrollTop;
+    } else {
+      currentScroll = scrollContainer.scrollTop;
+    }
+    
     const targetScroll = currentScroll + 230;
     
     window.youtubeReplyLog?.debug(`向下滚动 230px (从 ${currentScroll} 到 ${targetScroll})`);
-    
-    // 查找YouTube Studio的滚动容器
-    const containers = [
-      document.querySelector('ytcp-activity-section'),
-      document.querySelector('#primary-inner'),
-      document.querySelector('#primary'),
-      document.querySelector('.ytcp-app')
-    ].filter(Boolean);
-    
-    let scrollContainer = null;
-    for (const container of containers) {
-      if (container && container.scrollHeight > container.clientHeight) {
-        scrollContainer = container;
-        window.youtubeReplyLog?.debug(`找到滚动容器: ${container.tagName.toLowerCase()}`);
-        break;
-      }
-    }
-    
-    // 如果没有找到容器，使用window
-    if (!scrollContainer) {
-      scrollContainer = window;
-      window.youtubeReplyLog?.debug('使用window作为滚动容器');
-    }
+    window.youtubeReplyLog?.debug(`使用滚动容器: ${scrollContainer === window ? 'window' : scrollContainer.tagName.toLowerCase()}`);
     
     // 尝试多种滚动方法
     let scrollSuccess = false;
     
-    // 方法1：直接设置scrollTop
+    // 方法1：直接设置scrollTop（最可靠）
     try {
       if (scrollContainer === window) {
         window.scrollTo(0, targetScroll);
@@ -2363,106 +2382,30 @@ YouTubeCommentMonitor.prototype.scrollDownAfterReply = async function() {
       }
     }
     
-    // 方法3：模拟键盘PageDown键
-    if (!scrollSuccess) {
+    // 方法3：对于内部容器，使用focus trick
+    if (!scrollSuccess && scrollContainer !== window) {
       try {
-        // 创建PageDown按键事件
-        const pageDownEvent = new KeyboardEvent('keydown', {
-          key: 'PageDown',
-          code: 'PageDown',
-          keyCode: 34,
-          which: 34,
-          bubbles: true,
-          cancelable: true
-        });
+        // 查找容器内的一个元素并focus，然后滚动
+        const focusElement = scrollContainer.querySelector('ytcp-comment-thread') || 
+                           scrollContainer.querySelector('#content-text') ||
+                           scrollContainer.querySelector('.comment-thread');
         
-        document.dispatchEvent(pageDownEvent);
-        await this.sleep(200);
-        
-        const actualScroll = scrollContainer === window ? 
-          (window.scrollY || document.documentElement.scrollTop) : 
-          scrollContainer.scrollTop;
-        
-        if (actualScroll > currentScroll + 100) {
-          scrollSuccess = true;
-          window.youtubeReplyLog?.debug('方法3成功: 模拟PageDown键');
+        if (focusElement) {
+          focusElement.focus();
+          await this.sleep(50);
+          
+          // 再次尝试设置scrollTop
+          scrollContainer.scrollTop = targetScroll;
+          await this.sleep(100);
+          
+          const actualScroll = scrollContainer.scrollTop;
+          if (Math.abs(actualScroll - targetScroll) < 50) {
+            scrollSuccess = true;
+            window.youtubeReplyLog?.debug('方法3成功: focus + scrollTop');
+          }
         }
       } catch (e) {
         window.youtubeReplyLog?.debug(`方法3失败: ${e.message}`);
-      }
-    }
-    
-    // 方法4：模拟空格键（某些页面会响应空格键滚动）
-    if (!scrollSuccess) {
-      try {
-        const spaceEvent = new KeyboardEvent('keydown', {
-          key: ' ',
-          code: 'Space',
-          keyCode: 32,
-          which: 32,
-          bubbles: true,
-          cancelable: true
-        });
-        
-        document.dispatchEvent(spaceEvent);
-        await this.sleep(200);
-        
-        const actualScroll = scrollContainer === window ? 
-          (window.scrollY || document.documentElement.scrollTop) : 
-          scrollContainer.scrollTop;
-        
-        if (actualScroll > currentScroll + 100) {
-          scrollSuccess = true;
-          window.youtubeReplyLog?.debug('方法4成功: 模拟空格键');
-        }
-      } catch (e) {
-        window.youtubeReplyLog?.debug(`方法4失败: ${e.message}`);
-      }
-    }
-    
-    // 方法5：使用CSS transform临时移动内容
-    if (!scrollSuccess) {
-      try {
-        window.youtubeReplyLog?.debug('尝试使用CSS transform方法...');
-        
-        // 查找主内容区域
-        const mainContent = document.querySelector('ytcp-activity-section') || 
-                           document.querySelector('#primary-inner') ||
-                           document.querySelector('#primary');
-        
-        if (mainContent) {
-          // 记录原始transform
-          const originalTransform = mainContent.style.transform || '';
-          
-          // 应用向上移动的transform
-          mainContent.style.transform = `translateY(-230px)`;
-          mainContent.style.transition = 'transform 0.3s ease';
-          
-          await this.sleep(300);
-          
-          // 恢复原始transform，同时设置实际的scrollTop
-          mainContent.style.transition = '';
-          mainContent.style.transform = originalTransform;
-          
-          if (scrollContainer === window) {
-            window.scrollTo(0, currentScroll + 230);
-          } else {
-            scrollContainer.scrollTop = currentScroll + 230;
-          }
-          
-          await this.sleep(100);
-          
-          const actualScroll = scrollContainer === window ? 
-            (window.scrollY || document.documentElement.scrollTop) : 
-            scrollContainer.scrollTop;
-          
-          if (actualScroll > currentScroll + 200) {
-            scrollSuccess = true;
-            window.youtubeReplyLog?.debug('方法5成功: CSS transform');
-          }
-        }
-      } catch (e) {
-        window.youtubeReplyLog?.debug(`方法5失败: ${e.message}`);
       }
     }
     
@@ -2475,11 +2418,14 @@ YouTubeCommentMonitor.prototype.scrollDownAfterReply = async function() {
     window.youtubeReplyLog?.debug(`最终滚动距离: ${scrollDiff}px`);
     
     if (!scrollSuccess) {
-      window.youtubeReplyLog?.warning('⚠️ 所有滚动方法都失败了，页面可能阻止了程序化滚动');
+      window.youtubeReplyLog?.warning('⚠️ 滚动可能未按预期工作，但继续执行');
+    } else {
+      window.youtubeReplyLog?.success('✅ 滚动执行成功');
     }
     
   } catch (error) {
     console.error('Error scrolling down after reply:', error);
+    window.youtubeReplyLog?.error(`滚动出错: ${error.message}`);
   }
 };
 
