@@ -16,6 +16,7 @@ class YouTubeCommentMonitor {
     this.sessionReplyCount = 0; // 会话回复计数器
     this.lastActivityTime = Date.now(); // 最后活动时间
     this.inactivityTimer = null; // 不活动定时器
+    this.restartTimer = null; // 重启定时器
     this.myReplyCache = new Set(); // 缓存自己的回复内容，避免重复回复
     this.recentlyProcessedIds = new Set(); // 最近处理的评论ID，用于快速查找
     this.positionCommentMap = new Map(); // 位置到评论ID的映射，检测位置重复
@@ -949,36 +950,77 @@ class YouTubeCommentMonitor {
       return this.channelName;
     }
     
-    // 尝试从多个位置获取频道名称
+    // 尝试从多个位置获取频道名称 - 优先从页面主体结构，但也从评论区获取
     const selectors = [
-      // YouTube Studio 页面
+      // 方法1: 从导航栏频道名称文本获取 (页面主体结构)
+      '.ytcp-navigation-drawer #entity-name',
+      // 方法2: 从导航栏缩略图alt属性获取 (页面主体结构)
+      '.ytcp-navigation-drawer .thumbnail.image-thumbnail[alt]',
+      // 方法3: 从评论区心形图标获取 (评论区结构)
+      '.ytcp-comment-creator-heart #img[alt^="@"]',
+      // 方法4: 从评论区头像获取 (评论区结构)
+      '.ytcp-comment #avatar img[alt^="@"]',
+      // 方法5: 从页面标题或其他主体结构获取
+      '.ytcp-entity-page [data-channel-name]',
+      '.ytcp-app [data-channel-name]',
+      // 方法6: 从YouTube Studio 页面其他位置获取
       'ytcp-channel-name .ytcp-text-field-label',
       'ytcp-channel-name #channel-name',
-      '#channel-name .ytcp-text-field-label',
-      // YouTube 视频页面
-      '#channel-name.ytd-video-owner-renderer',
-      'ytd-channel-name a',
-      '#owner-name a',
-      // 其他可能的位置
-      '.ytcp-channel-name',
-      '[channel-name]'
+      '#channel-name .ytcp-text-field-label'
     ];
     
     for (const selector of selectors) {
       const element = document.querySelector(selector);
       if (element) {
-        const name = element.textContent.trim();
-        if (name && name !== '频道名称') {
+        let name = '';
+        
+        // 处理不同类型的元素
+        if (element.tagName === 'IMG') {
+          // 从img的alt属性获取
+          name = element.getAttribute('alt') || '';
+        } else {
+          // 从文本内容获取
+          name = element.textContent.trim();
+        }
+        
+        // 验证名称有效性 - 不做格式转换
+        if (name && 
+            name !== '频道名称' && 
+            name !== '频道' && 
+            name !== '我的频道' &&
+            name.length > 2 &&
+            !name.includes('YouTube') &&
+            !name.includes('Studio')) {
+          
+          // 移除@符号（如果有）
+          if (name.startsWith('@')) {
+            name = name.substring(1);
+          }
+          
           this.channelName = name;
-          window.youtubeReplyLog?.info(`获取到频道名称: ${name}`);
+          window.youtubeReplyLog?.info(`✅ 获取到频道名称: ${name} (来源: ${selector})`);
           return name;
         }
       }
     }
     
-    // 如果无法获取，使用默认名称
+    // 如果仍然无法获取，尝试从URL中提取频道信息
+    try {
+      const urlMatch = window.location.href.match(/\/channel\/([^\/]+)\//);
+      if (urlMatch && urlMatch[1]) {
+        const channelId = urlMatch[1];
+        // 如果能找到频道ID但找不到名称，使用一个通用标识
+        this.channelName = `Channel_${channelId.substring(0, 8)}`;
+        window.youtubeReplyLog?.info(`🔗 从URL获取到频道ID: ${channelId}，使用简化名称: ${this.channelName}`);
+        return this.channelName;
+      }
+    } catch (error) {
+      window.youtubeReplyLog?.debug('从URL提取频道信息失败:', error);
+    }
+    
+    // 最后的备用方案：使用默认名称
     this.channelName = 'Ai_Music_Bella'; // 根据用户提供的默认值
-    window.youtubeReplyLog?.info(`使用默认频道名称: ${this.channelName}`);
+    window.youtubeReplyLog?.warning(`⚠️ 未找到频道名称，使用默认值: ${this.channelName}`);
     return this.channelName;
   }
 
@@ -2275,10 +2317,18 @@ YouTubeCommentMonitor.prototype.setupActivityMonitoring = function() {
     const now = Date.now();
     const inactiveTime = now - this.lastActivityTime;
     
-    // 如果5分钟没有活动，停止自动回复
-    if (inactiveTime > 300000 && this.settings?.autoReplyEnabled) {
-      window.youtubeReplyLog?.warning('⚠️ 长时间无活动，自动停止回复');
-      this.stopAutoReply();
+    // 添加调试日志
+    window.youtubeReplyLog?.debug(`🔍 检查不活动状态: 不活动时间=${Math.floor(inactiveTime/1000)}秒, autoReplyEnabled=${this.settings?.autoReplyEnabled}`);
+    
+    // 如果2分钟没有活动，直接刷新页面
+    if (inactiveTime > 120000 && this.settings?.autoReplyEnabled) {
+      window.youtubeReplyLog?.warning('⚠️ 长时间无活动，即将刷新页面');
+      
+      // 延迟2秒后刷新页面，让日志有时间显示
+      setTimeout(() => {
+        window.youtubeReplyLog?.info('🔄 刷新页面中...');
+        window.location.reload();
+      }, 2000);
     }
   };
   
@@ -2290,11 +2340,18 @@ YouTubeCommentMonitor.prototype.updateActivity = function() {
   this.lastActivityTime = Date.now();
 };
 
-YouTubeCommentMonitor.prototype.stopAutoReply = function() {
+YouTubeCommentMonitor.prototype.stopAutoReply = function(clearRestartTimer = true) {
   // 停止所有自动回复活动
   this.stopAutoScroll();
   this.isProcessingQueue = false;
   this.replyQueue = [];
+  
+  // 清理重启定时器（除非指定不清理）
+  if (clearRestartTimer && this.restartTimer) {
+    window.youtubeReplyLog?.debug('🧹 清理重启定时器');
+    clearTimeout(this.restartTimer);
+    this.restartTimer = null;
+  }
   
   // 更新设置
   if (this.settings) {
@@ -2434,8 +2491,16 @@ YouTubeCommentMonitor.prototype.cleanup = function() {
   // 清理所有定时器和观察者
   if (this.observer) {
     this.observer.disconnect();
-    this.observer = null;
   }
+  
+  // 添加日志，检查是否意外清理了重启定时器
+  if (this.restartTimer) {
+    window.youtubeReplyLog?.warning('⚠️ 清理时发现重启定时器存在，正在清除');
+    clearTimeout(this.restartTimer);
+    this.restartTimer = null;
+  }
+  
+  this.observer = null;
   
   if (this.scrollCheckInterval) {
     clearInterval(this.scrollCheckInterval);
