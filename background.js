@@ -227,7 +227,7 @@ Original comment: "${commentText}"
   // 重置对话缓存（页面刷新时调用）
   resetConversationCache() {
     this.conversationCache = null;
-    console.log('对话缓存已重置');
+    // 对话缓存已重置
   }
 
   // Check if auto-reply is enabled
@@ -301,7 +301,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     case 'settingsUpdated':
       // 处理设置更新
-      console.log('Settings updated:', request.settings);
+      // 设置已更新
       // 重置对话缓存，使新的aiRole配置立即生效
       youtubeAIReply.resetConversationCache();
       sendResponse({ success: true });
@@ -329,4 +329,4 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
-console.log('YouTube AI Reply background script loaded');
+// Background script loaded

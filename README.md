@@ -14,7 +14,7 @@
 
 1. **下载或克隆此项目**
    ```bash
-   git clone https://github.com/yourusername/youtube-ai-reply.git
+   git clone https://github.com/bayllech/youtube-ai-reply.git
    cd youtube-ai-reply
    ```
 
@@ -185,3 +185,7 @@ MIT License
 ---
 
 如果你觉得这个项目有用，请给它一个星标！⭐
+
+## 项目作者
+
+**bayllech** - [GitHub主页](https://github.com/bayllech)
