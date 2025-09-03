@@ -48,15 +48,7 @@ class YouTubeAIReply {
         throw new Error('API key not configured');
       }
 
-      // 检查是否应该使用预置回复
-      if (this.shouldUsePresetReply(commentText, config)) {
-        return {
-          reply: this.getRandomPresetReply(config),
-          actions: []
-        };
-      }
-
-      // 使用AI生成回复
+      // 始终使用AI生成回复，删除所有预置回复逻辑
       const prompt = this.buildPrompt(commentText, replyStyle, config);
       
       const response = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {

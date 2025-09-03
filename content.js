@@ -16,6 +16,28 @@ class YouTubeCommentMonitor {
     this.sessionReplyCount = 0; // 会话回复计数器
     this.lastActivityTime = Date.now(); // 最后活动时间
     this.inactivityTimer = null; // 不活动定时器
+    this.myReplyCache = new Set(); // 缓存自己的回复内容，避免重复回复
+    this.recentlyProcessedIds = new Set(); // 最近处理的评论ID，用于快速查找
+    this.positionCommentMap = new Map(); // 位置到评论ID的映射，检测位置重复
+    
+    // 持久化缓存
+    this.persistentCacheKey = 'youtube-reply-persistent-cache';
+    this.cacheExpiryTime = 24 * 60 * 60 * 1000; // 24小时过期
+    this.maxCacheSize = 1000; // 最大缓存数量
+    
+    // 频道作者检测相关
+    this.channelName = null; // 当前频道名称
+    this.channelOwnerSelector = '.channel-owner, .ytcp-author-comment-badge[is-creator], [is-creator="true"]'; // 频道作者标识选择器
+    
+    // 滚动检查防抖
+    this.lastScrollCheckTime = 0; // 上次滚动检查时间
+    this.lastProcessingTime = 0; // 上次处理评论时间
+    this.scrollTimeout = null; // 滚动防抖定时器
+    
+    // 添加日志输出控制标志
+    this.hasLoggedLimitReached = false; // 是否已记录达到限制日志
+    this.hasLoggedQueueLimitReached = false; // 是否已记录队列达到限制日志
+    this.hasLoggedScrollLimitReached = false; // 是否已记录滚动达到限制日志
     
     this.init();
   }
@@ -27,16 +49,151 @@ class YouTubeCommentMonitor {
     const now = Date.now();
     
     if (!lastReload || now - parseInt(lastReload) > 1000) {
-      // 新加载或距离上次刷新超过1秒，清空缓存
+      // 新加载或距离上次刷新超过1秒，清空所有缓存
+      // 因为YouTube Studio刷新后只显示未回复的评论
       this.processedComments.clear();
       this.recentlyProcessed.clear();
       this.lastProcessedTexts.clear();
+      this.myReplyCache.clear(); // 清空回复缓存
+      this.recentlyProcessedIds.clear(); // 清空最近处理的ID
+      this.positionCommentMap.clear(); // 清空位置映射
+      
+      // 清空持久化缓存
+      localStorage.removeItem(this.persistentCacheKey);
+      
       if (window.youtubeReplyLog) {
-        window.youtubeReplyLog.info('页面已刷新，清空评论缓存');
+        window.youtubeReplyLog.info('页面已刷新，清空所有评论缓存');
       }
     }
     
     sessionStorage.setItem(reloadKey, now.toString());
+  }
+
+  // 持久化缓存管理方法
+  loadPersistentCache() {
+    try {
+      const cached = localStorage.getItem(this.persistentCacheKey);
+      if (cached) {
+        const data = JSON.parse(cached);
+        // 检查是否过期
+        if (Date.now() - data.timestamp < this.cacheExpiryTime) {
+          return new Set(data.processedIds || []);
+        } else {
+          // 缓存已过期，清除
+          localStorage.removeItem(this.persistentCacheKey);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading persistent cache:', error);
+    }
+    return new Set();
+  }
+
+  savePersistentCache() {
+    try {
+      // 合并内存缓存和持久化缓存
+      const allProcessedIds = new Set([
+        ...this.processedComments,
+        ...this.loadPersistentCache()
+      ]);
+      
+      // 限制缓存大小
+      if (allProcessedIds.size > this.maxCacheSize) {
+        // 转换为数组并保留最新的条目
+        const idsArray = Array.from(allProcessedIds);
+        const limitedIds = idsArray.slice(-this.maxCacheSize);
+        allProcessedIds.clear();
+        limitedIds.forEach(id => allProcessedIds.add(id));
+      }
+      
+      const data = {
+        processedIds: Array.from(allProcessedIds),
+        timestamp: Date.now()
+      };
+      
+      localStorage.setItem(this.persistentCacheKey, JSON.stringify(data));
+    } catch (error) {
+      console.error('Error saving persistent cache:', error);
+    }
+  }
+
+  isCommentProcessed(commentId) {
+    // 检查内存缓存
+    if (this.processedComments.has(commentId)) {
+      return true;
+    }
+    
+    // 检查持久化缓存
+    const persistentCache = this.loadPersistentCache();
+    if (persistentCache.has(commentId)) {
+      return true;
+    }
+    
+    return false;
+  }
+
+  markCommentAsProcessed(commentId) {
+    // 添加到内存缓存
+    this.processedComments.add(commentId);
+    
+    // 定期保存到持久化缓存
+    if (this.processedComments.size % 10 === 0) { // 每处理10条保存一次
+      this.savePersistentCache();
+    }
+  }
+
+  startCacheCleanup() {
+    // 每10分钟清理一次缓存
+    setInterval(() => {
+      this.cleanupCache();
+    }, 10 * 60 * 1000); // 10分钟
+    
+    // 页面卸载时保存缓存
+    window.addEventListener('beforeunload', () => {
+      this.savePersistentCache();
+    });
+  }
+
+  cleanupCache() {
+    try {
+      // 清理内存缓存
+      if (this.processedComments.size > 500) {
+        // 保留最近的500条
+        const idsArray = Array.from(this.processedComments);
+        const toKeep = idsArray.slice(-500);
+        this.processedComments.clear();
+        toKeep.forEach(id => this.processedComments.add(id));
+        
+        window.youtubeReplyLog?.debug('内存缓存已清理，保留最近500条');
+      }
+      
+      // 清理最近处理的ID集合
+      if (this.recentlyProcessedIds.size > 100) {
+        const oldestId = this.recentlyProcessedIds.values().next().value;
+        this.recentlyProcessedIds.delete(oldestId);
+      }
+      
+      // 清理文本位置映射
+      const now = Date.now();
+      for (const [key, value] of this.lastProcessedTexts) {
+        if (now - value.timestamp > 300000) { // 5分钟
+          this.lastProcessedTexts.delete(key);
+        }
+      }
+      
+      // 清理位置映射
+      for (const [position, data] of this.positionCommentMap) {
+        if (now - data.timestamp > 300000) { // 5分钟
+          this.positionCommentMap.delete(position);
+        }
+      }
+      
+      // 保存清理后的缓存
+      this.savePersistentCache();
+      
+    } catch (error) {
+      console.error('Error cleaning up cache:', error);
+    }
   }
 
   async init() {
@@ -45,8 +202,14 @@ class YouTubeCommentMonitor {
     // 页面刷新时清空缓存
     this.clearCacheOnPageReload();
     
-    // 重置会话回复计数器
+    // 强制清除所有可能存在的定时器
+    this.stopAutoScroll();
+    
+    // 重置会话回复计数器和日志标志
     this.sessionReplyCount = 0;
+    this.hasLoggedLimitReached = false;
+    this.hasLoggedQueueLimitReached = false;
+    this.hasLoggedScrollLimitReached = false;
     
     // 初始化日志
     if (window.youtubeReplyLog) {
@@ -57,6 +220,12 @@ class YouTubeCommentMonitor {
     } else {
       // console.log('youtubeReplyLog 未找到，日志功能不可用');
     }
+    
+    // 启动定期缓存清理
+    this.startCacheCleanup();
+    
+    // 获取频道名称
+    this.getChannelName();
     
     // Wait for settings to load
     const settingsLoaded = await this.loadSettings();
@@ -158,6 +327,9 @@ class YouTubeCommentMonitor {
           this.isProcessingQueue = false;
           this.isProcessingComments = false;
           this.sessionReplyCount = 0;
+          this.hasLoggedLimitReached = false;
+          this.hasLoggedQueueLimitReached = false;
+          this.hasLoggedScrollLimitReached = false;
           return;
         }
         
@@ -217,6 +389,12 @@ class YouTubeCommentMonitor {
       
       // 设置新的定时器，延迟100ms处理
       debounceTimer = setTimeout(() => {
+        // 首先检查是否达到回复限制
+        if (this.settings?.maxRepliesPerSession && 
+            this.sessionReplyCount >= this.settings.maxRepliesPerSession) {
+          return; // 达到限制，不处理任何新节点
+        }
+        
         mutations.forEach((mutation) => {
           mutation.addedNodes.forEach((node) => {
           if (node.nodeType === Node.ELEMENT_NODE) {
@@ -271,25 +449,35 @@ class YouTubeCommentMonitor {
     });
 
     // console.log('Comment observer started');
-    // Process existing comments
-    this.processExistingComments();
+    // Process existing comments only if auto-reply is enabled
+    if (this.settings?.autoReplyEnabled) {
+      this.processExistingComments();
+    }
     
-    // Start auto-scroll to load more comments
-    this.startAutoScroll();
+    // 不再自动启动滚动，避免无限循环
+    // 系统会通过其他机制检测和处理评论
     
     // 定期检查是否有遗漏的评论（添加防抖机制）
     this.commentCheckInterval = setInterval(() => {
-      if (!this.isProcessingQueue && !this.isProcessingComments && 
-          this.settings?.autoReplyEnabled &&
-          (!this.settings?.maxRepliesPerSession || 
-           this.sessionReplyCount < this.settings.maxRepliesPerSession)) {
+      // 检查基本条件
+      if (!this.settings?.autoReplyEnabled) {
+        return;
+      }
+      
+      // 检查是否达到回复限制
+      if (this.settings?.maxRepliesPerSession && 
+          this.sessionReplyCount >= this.settings.maxRepliesPerSession) {
+        return; // 达到限制，直接返回，不进行任何处理
+      }
+      
+      if (!this.isProcessingQueue && !this.isProcessingComments) {
         // 添加防抖，避免短时间内重复调用
-        if (!this.lastCheckTime || Date.now() - this.lastCheckTime > 5000) {
+        if (!this.lastCheckTime || Date.now() - this.lastCheckTime > 10000) {
           this.lastCheckTime = Date.now();
           this.processExistingComments();
         }
       }
-    }, 30000); // 每30秒检查一次
+    }, 60000); // 每60秒检查一次
   }
 
   isCommentElement(element) {
@@ -324,14 +512,14 @@ class YouTubeCommentMonitor {
     // Only accept elements that are actual comment text
     if (element.id === 'content-text' || element.classList.contains('yt-core-attributed-string')) {
       const text = element.textContent || '';
-      return text.trim().length > 10 && !text.includes('Reply') && !text.includes('Share');
+      return text.trim().length > 0 && !text.includes('Reply') && !text.includes('Share');
     }
     
     // For containers, check if they contain comment text
     const commentText = element.querySelector('#content-text, .yt-core-attributed-string');
     if (commentText) {
       const text = commentText.textContent || '';
-      return text.trim().length > 10 && !text.includes('Reply') && !text.includes('Share');
+      return text.trim().length > 0 && !text.includes('Reply') && !text.includes('Share');
     }
     
     return false;
@@ -347,10 +535,15 @@ class YouTubeCommentMonitor {
         return;
       }
       
+      // 检查自动回复是否启用
+      if (!this.settings?.autoReplyEnabled) {
+        return;
+      }
+      
       // 检查是否达到回复限制
       if (this.settings?.maxRepliesPerSession && 
           this.sessionReplyCount >= this.settings.maxRepliesPerSession) {
-        window.youtubeReplyLog?.debug('已达到回复限制，跳过评论扫描');
+        // 达到限制，静默返回，不设置处理标志
         return;
       }
       
@@ -376,7 +569,7 @@ class YouTubeCommentMonitor {
           id: this.getCommentId(comment),
           position: this.getElementPosition(comment)
         })).filter(comment => 
-          !this.processedComments.has(comment.id) && 
+          !this.isCommentProcessed(comment.id) && 
           comment.text && 
           comment.text.trim().length > 0
         ).sort((a, b) => a.position - b.position);
@@ -384,11 +577,12 @@ class YouTubeCommentMonitor {
         // 批量添加到队列
         window.youtubeReplyLog?.debug('准备添加到队列的评论列表:');
         commentsArray.forEach((comment, index) => {
-          window.youtubeReplyLog?.debug(`  ${index + 1}. 位置: ${comment.position}px, 内容: ${comment.text.substring(0, 30)}...`);
+          const displayText = comment.text || '(空内容)';
+          window.youtubeReplyLog?.debug(`  ${index + 1}. 位置: ${comment.position}px, 内容: ${displayText.substring(0, 30)}...`);
         });
         
         commentsArray.forEach(comment => {
-          this.processedComments.add(comment.id);
+          this.markCommentAsProcessed(comment.id);
           this.replyQueue.push({
             commentId: comment.id,
             commentText: comment.text,
@@ -406,16 +600,26 @@ class YouTubeCommentMonitor {
           if (!this.isProcessingQueue) {
             this.processReplyQueue();
           }
+        } else {
+          // 如果没有新评论，立即重置处理状态
+          this.isProcessingComments = false;
+          if (window.youtubeReplyLog?.isDebugMode) {
+            window.youtubeReplyLog?.debug('没有新评论，立即重置处理状态');
+          }
+          return;
         }
       } else {
         window.youtubeReplyLog?.debug(`队列中已有 ${this.replyQueue.length} 条评论在等待处理`);
       }
       
-      // 重置处理状态
+      // 重置处理状态（使用更长的延迟，避免频繁调用）
       setTimeout(() => {
         this.isProcessingComments = false;
-        window.youtubeReplyLog?.debug('isProcessingComments 状态已重置');
-      }, 1000);
+        // 只在调试模式下输出日志
+        if (window.youtubeReplyLog?.isDebugMode) {
+          window.youtubeReplyLog?.debug('isProcessingComments 状态已重置');
+        }
+      }, 3000);
       
     } catch (error) {
       console.error('Error processing existing comments:', error);
@@ -437,8 +641,15 @@ class YouTubeCommentMonitor {
       // 检查是否达到回复限制
       if (this.settings?.maxRepliesPerSession && 
           this.sessionReplyCount >= this.settings.maxRepliesPerSession) {
-        window.youtubeReplyLog?.debug('已达到回复限制，不处理新评论');
+        // 只在第一次达到限制时输出日志
+        if (!this.hasLoggedLimitReached) {
+          window.youtubeReplyLog?.status(`⏹️ 已达到回复限制 (${this.settings.maxRepliesPerSession} 条)`);
+          this.hasLoggedLimitReached = true;
+        }
         return;
+      } else {
+        // 重置标志，允许再次记录
+        this.hasLoggedLimitReached = false;
       }
       
       // Ensure settings are loaded
@@ -475,6 +686,17 @@ class YouTubeCommentMonitor {
       // Get the position of the comment
       const position = this.getElementPosition(commentElement);
       
+      // 强化的重复检测机制
+      // 1. 检查位置是否已经被处理过（防止相同位置的不同ID）
+      if (this.positionCommentMap.has(position)) {
+        const existingId = this.positionCommentMap.get(position);
+        // 如果同一个位置在短时间内再次出现，很可能是重复
+        if (Date.now() - (this.lastProcessedTexts.get(existingId)?.timestamp || 0) < 5000) {
+          window.youtubeReplyLog?.debug(`检测到位置重复 (${position}px)，可能已处理过`);
+          return;
+        }
+      }
+      
       // Get comment ID to avoid duplicates
       const commentId = this.getCommentId(commentElement);
       
@@ -483,14 +705,67 @@ class YouTubeCommentMonitor {
         return;
       }
       
-      // 检查是否已经处理过
-      if (this.processedComments.has(commentId)) {
-        window.youtubeReplyLog?.debug(`评论已处理过，跳过: ${commentId}`);
+      // 2. 检查是否已经处理过（包括持久化缓存）
+      if (this.isCommentProcessed(commentId)) {
+        window.youtubeReplyLog?.debug(`评论ID已存在: ${commentId}`);
+        return;
+      }
+      
+      // 3. 检查最近处理的ID集合（用于快速查找）
+      if (this.recentlyProcessedIds.has(commentId)) {
+        window.youtubeReplyLog?.debug(`评论ID在最近处理过: ${commentId}`);
+        return;
+      }
+      
+      // 4. 检查文本相似度
+      const authorElement = commentElement.querySelector('.author-name, .comment-author, [id="author-text"]') ||
+                           commentElement.closest('.comment-renderer')?.querySelector('.author-name');
+      const authorName = authorElement ? authorElement.textContent.trim().substring(0, 20) : 'unknown';
+      
+      if (this.hasSimilarComment(commentText, authorName)) {
+        return;
+      }
+      
+      // 5. 检查文本和位置的组合是否重复
+      const textHash = this.simpleHash(commentText.substring(0, 50));
+      const positionKey = `${position}_${textHash}`;
+      if (this.lastProcessedTexts.has(positionKey) && 
+          Date.now() - this.lastProcessedTexts.get(positionKey).timestamp < 10000) {
+        window.youtubeReplyLog?.debug(`检测到文本和位置组合重复，跳过`);
+        return;
+      }
+      
+      // 6. 检查是否为频道作者自己的评论
+      if (this.isChannelOwnerComment(commentElement)) {
+        window.youtubeReplyLog?.info('跳过频道作者自己的评论');
+        return;
+      }
+      
+      // 7. 检查频道作者是否已经回复过该评论
+      if (this.hasChannelOwnerReplied(commentElement)) {
+        window.youtubeReplyLog?.info('跳过已有频道作者回复的评论');
         return;
       }
       
       // 立即标记为已处理，防止重复加入队列
-      this.processedComments.add(commentId);
+      this.markCommentAsProcessed(commentId);
+      
+      // 同时添加到其他追踪集合中
+      this.recentlyProcessedIds.add(commentId);
+      if (this.recentlyProcessedIds.size > 100) {
+        // 限制大小，删除最旧的记录
+        const oldestId = this.recentlyProcessedIds.values().next().value;
+        this.recentlyProcessedIds.delete(oldestId);
+      }
+      
+      // 添加到位置映射（使用更精确的位置信息）
+      const positionInfo = {
+        commentId,
+        textHash: this.simpleHash(commentText.substring(0, 50)),
+        timestamp: Date.now(),
+        element: commentElement
+      };
+      this.positionCommentMap.set(position, positionInfo);
       
       // Add to reply queue
       this.replyQueue.push({
@@ -518,7 +793,8 @@ class YouTubeCommentMonitor {
       // Extract the actual comment text first
       const commentText = this.extractCommentText(commentElement);
       if (!commentText) {
-        return `error_${Date.now()}`;
+        // 无法提取文本的评论，跳过处理
+        return 'skip_no_text';
       }
       
       // Check if this is a reply (has is-reply attribute or is in reply section)
@@ -551,25 +827,17 @@ class YouTubeCommentMonitor {
         }
       }
       
-      // If no stable ID found, use hash of comment text and timestamp
+      // If no stable ID found, create a simpler ID based on comment text only
+      // Since we're using channel-based deduplication, we don't need author info
       const textHash = this.simpleHash(commentText);
-      // Check if we've seen similar content recently
-      const now = Date.now();
-      const timeWindow = Math.floor(now / 300000); // 5-minute windows
       
-      // Also check for author info to make ID more unique
-      const authorElement = commentElement.querySelector('.author-name, .comment-author, [id="author-text"]') ||
-                           commentElement.closest('.comment-renderer')?.querySelector('.author-name');
-      const authorName = authorElement ? authorElement.textContent.trim().substring(0, 10) : 'unknown';
-      const authorHash = this.simpleHash(authorName);
-      
-      // Create ID that's stable within a time window, including author info
-      const uniqueId = `comment_${textHash}_${authorHash}_${timeWindow}`;
-      window.youtubeReplyLog?.debug(`生成评论ID: ${uniqueId} (基于文本、作者和时间窗口)`);
+      // Create simpler stable ID
+      const uniqueId = `stable_${textHash}`;
       return uniqueId;
     } catch (error) {
       console.error('Error getting comment ID:', error);
-      return `error_${Date.now()}`;
+      // 出错时返回跳过标记，避免生成基于时间的ID
+      return 'skip_error';
     }
   }
   
@@ -582,6 +850,62 @@ class YouTubeCommentMonitor {
     }
     return Math.abs(hash).toString(36);
   }
+
+  // 计算文本相似度（简单的Levenshtein距离实现）
+  getTextSimilarity(str1, str2) {
+    const len1 = str1.length;
+    const len2 = str2.length;
+    const matrix = [];
+    
+    // 初始化矩阵
+    for (let i = 0; i <= len2; i++) {
+      matrix[i] = [i];
+    }
+    for (let j = 0; j <= len1; j++) {
+      matrix[0][j] = j;
+    }
+    
+    // 填充矩阵
+    for (let i = 1; i <= len2; i++) {
+      for (let j = 1; j <= len1; j++) {
+        if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+          matrix[i][j] = matrix[i - 1][j - 1];
+        } else {
+          matrix[i][j] = Math.min(
+            matrix[i - 1][j - 1] + 1,
+            matrix[i][j - 1] + 1,
+            matrix[i - 1][j] + 1
+          );
+        }
+      }
+    }
+    
+    const distance = matrix[len2][len1];
+    const maxLength = Math.max(len1, len2);
+    return maxLength === 0 ? 1 : 1 - (distance / maxLength);
+  }
+
+  // 检查是否有相似的已处理评论
+  hasSimilarComment(commentText, authorName) {
+    const persistentCache = this.loadPersistentCache();
+    const allProcessedIds = new Set([
+      ...this.processedComments,
+      ...persistentCache
+    ]);
+    
+    // 检查最近处理的文本
+    for (const [key, value] of this.lastProcessedTexts) {
+      if (Date.now() - value.timestamp < 60000) { // 1分钟内
+        const similarity = this.getTextSimilarity(commentText, value.text);
+        if (similarity > 0.8) { // 80%相似度
+          window.youtubeReplyLog?.debug(`检测到相似文本 (${Math.round(similarity * 100)}%)，跳过`);
+          return true;
+        }
+      }
+    }
+    
+    return false;
+  }
   
   getElementPosition(element) {
     // Get the Y position of the element relative to the viewport
@@ -592,19 +916,144 @@ class YouTubeCommentMonitor {
     return Math.round(rect.top + scrollY);
   }
   
+  // 编码文本用于缓存比较
+  encodeTextForCache(text) {
+    // 使用 TextEncoder 将文本转换为 UTF-8 字节数组
+    // 然后转换为 base64 字符串，确保 emoji 和特殊字符的一致性
+    const normalizedText = text.trim()
+      .replace(/\s+/g, ' ')  // 标准化空格
+      .replace(/\uFE0F/g, ''); // 移除 emoji 变体选择器
+    
+    const encoder = new TextEncoder();
+    const bytes = encoder.encode(normalizedText);
+    return btoa(String.fromCharCode(...bytes));
+  }
+
   isOwnReply(text) {
-    // Check if the text looks like our AI-generated reply
-    const ownReplyPatterns = [
-      '谢谢你的夸奖',
-      '¡Gracias',
-      'AI-generated reply',
-      '很高兴你喜欢',
-      'Me alegra que te guste',
-      '感谢你的',
-      'Thank you for'
+    // 检查是否在回复缓存中（使用编码后的文本）
+    // 这个方法主要用于在MutationObserver中快速过滤
+    if (this.myReplyCache && this.myReplyCache.has(this.encodeTextForCache(text))) {
+      window.youtubeReplyLog?.debug('检测到自己的回复（缓存匹配）:', text.substring(0, 30));
+      return true;
+    }
+    
+    return false;
+  }
+
+  // 获取当前频道名称
+  getChannelName() {
+    if (this.channelName) {
+      return this.channelName;
+    }
+    
+    // 尝试从多个位置获取频道名称
+    const selectors = [
+      // YouTube Studio 页面
+      'ytcp-channel-name .ytcp-text-field-label',
+      'ytcp-channel-name #channel-name',
+      '#channel-name .ytcp-text-field-label',
+      // YouTube 视频页面
+      '#channel-name.ytd-video-owner-renderer',
+      'ytd-channel-name a',
+      '#owner-name a',
+      // 其他可能的位置
+      '.ytcp-channel-name',
+      '[channel-name]'
     ];
     
-    return ownReplyPatterns.some(pattern => text.includes(pattern));
+    for (const selector of selectors) {
+      const element = document.querySelector(selector);
+      if (element) {
+        const name = element.textContent.trim();
+        if (name && name !== '频道名称') {
+          this.channelName = name;
+          window.youtubeReplyLog?.info(`获取到频道名称: ${name}`);
+          return name;
+        }
+      }
+    }
+    
+    // 如果无法获取，使用默认名称
+    this.channelName = 'Ai_Music_Bella'; // 根据用户提供的默认值
+    window.youtubeReplyLog?.info(`使用默认频道名称: ${this.channelName}`);
+    return this.channelName;
+  }
+
+  // 检查评论是否来自频道作者
+  isChannelOwnerComment(commentElement) {
+    const channelName = this.getChannelName();
+    
+    // 方法1: 检查作者名称
+    const authorElement = commentElement.querySelector('.author-name, .comment-author, [id="author-text"], .author-text') ||
+                         commentElement.closest('.comment-renderer')?.querySelector('.author-name') ||
+                         commentElement.closest('ytcp-comment')?.querySelector('#name a');
+    
+    if (authorElement) {
+      const authorName = authorElement.textContent.trim();
+      if (authorName === channelName || authorName === `@${channelName}`) {
+        window.youtubeReplyLog?.debug(`检测到频道作者自己的评论: ${authorName}`);
+        return true;
+      }
+    }
+    
+    // 方法2: 检查是否有频道作者标识
+    const ownerBadge = commentElement.querySelector(this.channelOwnerSelector);
+    if (ownerBadge) {
+      window.youtubeReplyLog?.debug('检测到频道作者标识徽章');
+      return true;
+    }
+    
+    // 方法3: 检查是否在YouTube Studio环境且有creator标识
+    const comment = commentElement.closest('ytcp-comment');
+    if (comment) {
+      const badgeElement = comment.querySelector('ytcp-author-comment-badge[is-creator]');
+      if (badgeElement) {
+        window.youtubeReplyLog?.debug('检测到YouTube Studio创作者标识');
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
+  // 检查频道作者是否已经回复过该评论
+  hasChannelOwnerReplied(commentElement) {
+    const channelName = this.getChannelName();
+    
+    // 获取评论的回复区域
+    const replySection = commentElement.closest('ytcp-comment-thread')?.querySelector('ytcp-comment-replies') ||
+                        commentElement.closest('.comment-thread')?.querySelector('.comment-thread-replies');
+    
+    if (!replySection) {
+      return false;
+    }
+    
+    // 检查所有回复
+    const replies = replySection.querySelectorAll('ytcp-comment[is-reply], .comment-reply, ytd-comment-renderer[is-reply]');
+    
+    for (const reply of replies) {
+      // 检查回复者是否是频道作者
+      const replyAuthor = reply.querySelector('.author-name, .comment-author, [id="author-text"], .author-text') ||
+                          reply.querySelector('#name a') ||
+                          reply.querySelector('ytcp-author-comment-badge[is-creator] a');
+      
+      if (replyAuthor) {
+        const replyAuthorName = replyAuthor.textContent.trim();
+        if (replyAuthorName === channelName || replyAuthorName === `@${channelName}`) {
+          window.youtubeReplyLog?.debug('检测到频道作者已经回复过该评论');
+          return true;
+        }
+      }
+      
+      // 检查是否有创作者徽章
+      const creatorBadge = reply.querySelector(this.channelOwnerSelector);
+      if (creatorBadge) {
+        window.youtubeReplyLog?.debug('检测到频道作者的回复徽章');
+        return true;
+      }
+    }
+    
+    return false;
   }
 
   // 检查是否应该使用预置回复
@@ -800,7 +1249,7 @@ class YouTubeCommentMonitor {
       
       // Last resort - use the element's text if it looks like a comment
       const text = commentElement.textContent.trim();
-      if (text.length > 10 && !text.includes('Reply') && !text.includes('Share')) {
+      if (text.length > 0 && !text.includes('Reply') && !text.includes('Share')) {
 
         return text;
       }
@@ -849,7 +1298,7 @@ class YouTubeCommentMonitor {
         // 再次检查是否应该回复
         if (await this.shouldReplyToComment(comment)) {
           try {
-            await this.generateAndPostReply(comment);
+            await this.generateAndPostReply(comment, processedCount, totalInQueue);
             
             // 处理完成后，向下滚动以查看下一条评论
             if (this.replyQueue.length > 0) {
@@ -870,26 +1319,25 @@ class YouTubeCommentMonitor {
         // 检查是否达到回复限制
         if (this.settings?.maxRepliesPerSession && 
             this.sessionReplyCount >= this.settings.maxRepliesPerSession) {
-          window.youtubeReplyLog?.status(`已达到回复限制 (${this.settings.maxRepliesPerSession} 条)，停止处理`);
+          if (!this.hasLoggedQueueLimitReached) {
+            window.youtubeReplyLog?.status(`⏹️ 已达到回复限制 (${this.settings.maxRepliesPerSession} 条)，停止处理`);
+            this.hasLoggedQueueLimitReached = true;
+          }
           break;
         }
       }
       
       window.youtubeReplyLog?.success(`队列处理完成，共处理 ${processedCount} 条评论`);
       
+      // 立即保存持久化缓存，确保已处理的评论被正确记录
+      this.savePersistentCache();
+      
     } finally {
       this.isProcessingQueue = false;
       
-      // 队列处理完成后，检查是否还有未加载的评论
-      if (this.settings?.autoReplyEnabled && 
-          this.sessionReplyCount < (this.settings?.maxRepliesPerSession || 10)) {
-        // 延迟后重新开始自动滚动以加载更多评论
-        setTimeout(() => {
-          if (!this.isProcessingQueue && !this.isScrolling) {
-            this.startAutoScroll();
-          }
-        }, 3000);
-      }
+      // 队列处理完成后，不再自动启动滚动
+      // 避免无限循环：处理完成 → 滚动 → 再次处理 → 循环
+      // 如果需要加载更多评论，用户应手动滚动
     }
   }
 
@@ -908,8 +1356,26 @@ class YouTubeCommentMonitor {
       if (this.sessionReplyCount >= this.settings.maxRepliesPerSession) {
         window.youtubeReplyLog?.status('⛔ 已达到单次最大回复数，停止自动回复');
         this.stopAutoScroll();
+        // 停止观察者，避免继续检测新评论
+        if (this.observer) {
+          this.observer.disconnect();
+          this.observer = null;
+          window.youtubeReplyLog?.debug('已停止MutationObserver');
+        }
         return false;
       }
+    }
+
+    // 检查是否是频道作者自己的评论
+    if (this.isChannelOwnerComment(comment.element)) {
+      window.youtubeReplyLog?.debug('跳过频道作者自己的评论');
+      return false;
+    }
+    
+    // 检查频道作者是否已经回复过该评论
+    if (this.hasChannelOwnerReplied(comment.element)) {
+      window.youtubeReplyLog?.debug('跳过已有频道作者回复的评论');
+      return false;
     }
 
     // 所有评论都应该回复，使用本地回复规则判断是否使用预置回复
@@ -948,71 +1414,63 @@ class YouTubeCommentMonitor {
     });
   }
 
-  async generateAndPostReply(comment) {
+  async generateAndPostReply(comment, queuePosition = 1, totalInQueue = 1) {
     try {
       // 更新活动时间
       this.updateActivity();
       
       // 获取当前回复编号（使用会话计数器）
-      const replyNumber = this.sessionReplyCount + 1;
+      // 使用传入的队列位置显示
       
       // 更新回复编号显示
       if (window.youtubeReplyLog) {
-        window.youtubeReplyLog.setCurrentReplyNumber(replyNumber);
-        window.youtubeReplyLog.step(`📝 正在回复第 ${replyNumber} 条评论`);
+        window.youtubeReplyLog.step(`📝 正在回复第 ${queuePosition} 条评论`);
       }
       
       window.youtubeReplyLog?.processing('💭 正在生成回复内容...');
       window.youtubeReplyLog?.debug(`📄 原评论: ${comment.commentText.substring(0, 50)}...`);
 
-      let replyText;
+      // 始终使用AI生成回复，删除所有预置回复逻辑
+      window.youtubeReplyLog?.debug('🤖 请求AI生成回复...');
+      let response;
       let aiResponse = null;
-      let usePresetReply = false;
-      
-      // 首先检查是否应该使用预置回复（基于本地回复规则）
-      if (this.settings?.localReplyRules && this.settings?.presetReplies) {
-        usePresetReply = this.shouldUsePresetReply(comment.commentText);
-        if (usePresetReply) {
-          replyText = this.getRandomPresetReply();
-          window.youtubeReplyLog?.info('📋 使用预置回复:', replyText);
-        }
-      }
-      
-      // 如果不使用预置回复，检查是否是表情符号评论
-      if (!replyText && this.isEmojiHeavy(comment.commentText)) {
-        replyText = this.generateEmojiReply();
-        window.youtubeReplyLog?.info('😊 使用表情回复:', replyText);
-        // emoji回复不执行点赞操作
-      } else if (!replyText) {
-        // Generate AI reply for regular comments
-        window.youtubeReplyLog?.debug('🤖 请求AI生成回复...');
-        let response;
-        try {
-          response = await chrome.runtime.sendMessage({
-            action: 'generateReply',
-            commentText: comment.commentText,
-            replyStyle: this.settings?.replyStyle || 'friendly'
-          });
-          
-          // 检查响应是否存在
-          if (!response) {
-            throw new Error('未收到API响应');
-          }
-          
-          if (!response.success) {
-            throw new Error(response.error || 'API请求失败');
-          }
-        } catch (error) {
-          // 如果是消息传递错误，添加更详细的错误信息
-          if (error.message.includes('message channel closed')) {
-            throw new Error('API响应超时，请重试');
-          }
-          throw error;
-        }
-
-        // 保存AI响应信息用于后续操作
-        aiResponse = response.reply;
+      let replyText; // 提前声明replyText变量
+      try {
+        response = await chrome.runtime.sendMessage({
+          action: 'generateReply',
+          commentText: comment.commentText,
+          replyStyle: this.settings?.replyStyle || 'friendly'
+        });
         
+        // 检查响应是否存在
+        if (!response) {
+          throw new Error('未收到API响应');
+        }
+        
+        if (!response.success) {
+          throw new Error(response.error || 'API请求失败');
+        }
+      } catch (error) {
+        // AI请求失败，使用默认回复
+        window.youtubeReplyLog?.warning(`⚠️ AI请求失败: ${error.message}`);
+        window.youtubeReplyLog?.info('🔧 使用默认回复: 🖤');
+        
+        // 使用默认回复
+        replyText = '🖤';
+        
+        // 跳过AI响应处理，直接发布回复
+        window.youtubeReplyLog?.success('✅ 已使用默认回复');
+        window.youtubeReplyLog?.info(`💬 回复内容: ${replyText}`);
+      }
+
+      // 保存AI响应信息用于后续操作
+      aiResponse = response ? response.reply : null;
+      
+      // 如果replyText已经在catch块中设置（使用默认回复），则跳过AI响应处理
+      if (replyText === '🖤') {
+        // 已经使用默认回复，不需要处理AI响应
+      } else {
+        // 处理正常的AI响应
         // 处理新的响应格式
         if (typeof aiResponse === 'object' && aiResponse !== null) {
           // 新格式：包含reply、quality和actions
@@ -1039,8 +1497,8 @@ class YouTubeCommentMonitor {
       window.youtubeReplyLog?.step('📤 正在发布回复...');
       await this.postReply(comment.element, replyText);
 
-      // 根据AI判断执行点赞和点红心操作
-      if (typeof aiResponse === 'object' && aiResponse !== null && aiResponse.actions) {
+      // 根据AI判断执行点赞和点红心操作（仅在使用AI回复时）
+      if (replyText !== '🖤' && typeof aiResponse === 'object' && aiResponse !== null && aiResponse.actions) {
         const actions = aiResponse.actions;
         if (actions.includes('like')) {
           window.youtubeReplyLog?.processing('👍 正在点赞...');
@@ -1052,7 +1510,25 @@ class YouTubeCommentMonitor {
         }
       }
 
-      // Increment reply count and update display
+      // 只有在回复真正发布成功后才增加计数器
+      // 注意：计数器在最后增加
+      
+      // 将回复内容添加到缓存，避免重复回复
+      if (replyText) {
+        // 使用编码后的文本作为缓存键
+        const encodedReplyText = this.encodeTextForCache(replyText);
+        this.myReplyCache.add(encodedReplyText);
+        // 限制缓存大小，避免内存泄漏
+        if (this.myReplyCache.size > 100) {
+          // 如果缓存超过100条，删除最早的一半
+          const entries = Array.from(this.myReplyCache);
+          this.myReplyCache.clear();
+          entries.slice(50).forEach(entry => this.myReplyCache.add(entry));
+        }
+        window.youtubeReplyLog?.debug(`回复内容已添加到缓存，当前缓存大小: ${this.myReplyCache.size}`);
+      }
+      
+      // 回复成功，增加计数器
       await this.incrementReplyCount();
       this.sessionReplyCount++; // 增加会话回复计数
       
@@ -1062,10 +1538,14 @@ class YouTubeCommentMonitor {
         window.youtubeReplyLog.updateReplyCount(this.sessionReplyCount, maxReplies);
       }
       
-      window.youtubeReplyLog?.success(`🎉 第 ${replyNumber} 条回复完成！`);
+      window.youtubeReplyLog?.success(`🎉 第 ${this.sessionReplyCount} 条回复完成！`);
 
     } catch (error) {
       console.error('Error generating/posting reply:', error);
+      
+      // 回复失败时，不增加计数器，所以不需要回滚
+      // 只显示错误信息
+      window.youtubeReplyLog?.error(`回复失败: ${error.message}`);
     }
   }
 
@@ -1504,11 +1984,20 @@ class YouTubeCommentMonitor {
         return;
       }
       
+      // 检查自动回复是否启用
+      if (!this.settings?.autoReplyEnabled) {
+        this.stopAutoScroll();
+        return;
+      }
+      
       // 检查是否达到回复限制
       if (this.settings?.maxRepliesPerSession && 
           this.sessionReplyCount >= this.settings.maxRepliesPerSession) {
         this.stopAutoScroll();
-        window.youtubeReplyLog?.status('⏹️ 已达到回复限制，停止自动滚动');
+        if (!this.hasLoggedScrollLimitReached) {
+          window.youtubeReplyLog?.status('⏹️ 已达到回复限制，停止自动滚动');
+          this.hasLoggedScrollLimitReached = true;
+        }
         return;
       }
       
@@ -1565,12 +2054,12 @@ class YouTubeCommentMonitor {
         this.lastScrollTime = now;
         window.youtubeReplyLog?.debug(`自动向下滚动 ${scrollAmount}px，距离底部 ${distanceFromBottom}px`);
         
-        // 滚动后检查新评论（仅在不在处理队列时）
+        // 滚动后不再立即检查新评论，避免无限循环
+        // 系统会通过滚动事件监听器自动检测新评论
         setTimeout(() => {
-          if (!this.isProcessingQueue) {
-            this.processExistingComments();
-          }
-        }, 2000);
+          // 不再主动调用 processExistingComments，让滚动事件监听器处理
+          this.checkForNewCommentsAfterScroll();
+        }, 3000);
       } else {
         window.youtubeReplyLog?.debug(`已接近底部，距离底部 ${distanceFromBottom}px`);
       }
@@ -1643,8 +2132,46 @@ class YouTubeCommentMonitor {
   
   checkForNewCommentsAfterScroll() {
     // 简化版本，只在需要时处理
-    if (!this.isProcessingQueue) {
-      this.processExistingComments();
+    if (!this.isProcessingQueue && 
+        !this.isProcessingComments &&
+        this.settings?.autoReplyEnabled && // 检查自动回复是否启用
+        (!this.settings?.maxRepliesPerSession || 
+         this.sessionReplyCount < this.settings.maxRepliesPerSession)) {
+      // 添加防抖，避免短时间内重复调用
+      if (!this.lastScrollCheckTime || Date.now() - this.lastScrollCheckTime > 30000) { // 增加到30秒
+        this.lastScrollCheckTime = Date.now();
+        
+        // 只有在距离上次处理超过60秒时才处理
+        if (this.lastProcessingTime && Date.now() - this.lastProcessingTime < 60000) {
+          return;
+        }
+        
+        // 简化检查：如果所有评论都已被处理，则不再处理
+        const comments = Array.from(document.querySelectorAll('#comment, ytcp-comment'));
+        window.youtubeReplyLog?.debug(`滚动检查：找到 ${comments.length} 个评论元素`);
+        
+        const hasUnprocessedComments = comments.some(comment => {
+          const commentId = this.getCommentId(comment);
+          // 跳过无法处理的评论
+          if (commentId.startsWith('skip_')) {
+            return false;
+          }
+          // 检查内存缓存和持久化缓存
+          const isUnprocessed = commentId !== 'reply_skip' && !this.isCommentProcessed(commentId);
+          if (isUnprocessed) {
+            window.youtubeReplyLog?.debug(`发现未处理评论：${commentId}`);
+          }
+          return isUnprocessed;
+        });
+        
+        if (hasUnprocessedComments) {
+          window.youtubeReplyLog?.debug('滚动检查：发现未处理评论，开始处理');
+          this.lastProcessingTime = Date.now();
+          this.processExistingComments();
+        } else {
+          window.youtubeReplyLog?.debug('滚动检查：所有评论已处理，跳过');
+        }
+      }
     }
   }
   
@@ -1679,8 +2206,11 @@ class YouTubeCommentMonitor {
             button.click();
             await this.sleep(3000); // 等待新评论加载
             
-            // 检查新加载的评论
-            await this.processExistingComments();
+            // 检查新加载的评论（仅在未达到回复限制时）
+            if (!this.settings?.maxRepliesPerSession || 
+                this.sessionReplyCount < this.settings.maxRepliesPerSession) {
+              await this.processExistingComments();
+            }
             break;
           }
         }
@@ -1710,8 +2240,11 @@ class YouTubeCommentMonitor {
             
             await this.sleep(3000);
             
-            // 再次检查评论
-            await this.processExistingComments();
+            // 再次检查评论（仅在未达到回复限制时）
+            if (!this.settings?.maxRepliesPerSession || 
+                this.sessionReplyCount < this.settings.maxRepliesPerSession) {
+              await this.processExistingComments();
+            }
           } else {
             window.youtubeReplyLog?.info('已到达页面底部，没有更多评论可加载');
           }
@@ -1813,6 +2346,10 @@ YouTubeCommentMonitor.prototype.stopAutoReply = function() {
   // 更新设置
   if (this.settings) {
     this.settings.autoReplyEnabled = false;
+    // 重置所有日志标志
+    this.hasLoggedLimitReached = false;
+    this.hasLoggedQueueLimitReached = false;
+    this.hasLoggedScrollLimitReached = false;
     chrome.storage.sync.set({ settings: this.settings }, () => {
       window.youtubeReplyLog?.status('⏸️ 自动回复已停止');
     });

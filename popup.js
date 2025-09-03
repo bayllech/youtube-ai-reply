@@ -10,7 +10,18 @@ class PopupManager {
     this.forceVisibility();
     
     // Load settings
-    await this.loadSettings();
+    const settingsLoaded = await this.loadSettings();
+    
+    // If settings failed to load, show error message
+    if (!settingsLoaded) {
+      const notification = document.getElementById('notification');
+      const notificationText = document.getElementById('notificationText');
+      if (notification && notificationText) {
+        notificationText.textContent = '无法连接到扩展程序，请刷新页面重试';
+        notification.className = 'notification error';
+        notification.style.display = 'block';
+      }
+    }
     
     // Setup event listeners
     this.setupEventListeners();
@@ -20,16 +31,35 @@ class PopupManager {
   }
 
   async loadSettings() {
-    try {
-      const response = await chrome.runtime.sendMessage({ action: 'getSettings' });
-      if (response.success) {
-        this.settings = response.settings;
-      } else {
-        console.error('Failed to load settings:', response.error);
+    // 添加重试机制，等待 background script 加载
+    let retryCount = 0;
+    const maxRetries = 5;
+    const retryDelay = 200; // 200ms
+    
+    const tryLoadSettings = async () => {
+      try {
+        const response = await chrome.runtime.sendMessage({ action: 'getSettings' });
+        if (response.success) {
+          this.settings = response.settings;
+          return true;
+        } else {
+          console.error('Failed to load settings:', response.error);
+          return false;
+        }
+      } catch (error) {
+        if (retryCount < maxRetries && error.message.includes('Could not establish connection')) {
+          retryCount++;
+          console.log(`Retrying connection to background script (${retryCount}/${maxRetries})...`);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+          return tryLoadSettings();
+        } else {
+          console.error('Error loading settings:', error);
+          return false;
+        }
       }
-    } catch (error) {
-      console.error('Error loading settings:', error);
-    }
+    };
+    
+    return await tryLoadSettings();
   }
 
   setupEventListeners() {
