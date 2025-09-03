@@ -71,6 +71,14 @@ class PopupManager {
       });
     }
 
+    // Auto-refresh toggle
+    const autoRefreshToggle = document.getElementById('autoRefreshEnabled');
+    if (autoRefreshToggle) {
+      autoRefreshToggle.addEventListener('change', (e) => {
+        this.updateSetting('autoRefreshEnabled', e.target.checked);
+      });
+    }
+
     // Open options button
     const openOptionsBtn = document.getElementById('openOptions');
     if (openOptionsBtn) {
@@ -104,6 +112,12 @@ class PopupManager {
     if (autoReplyToggle) {
       autoReplyToggle.checked = this.settings.autoReplyEnabled || false;
     }
+
+    // Update auto-refresh toggle
+    const autoRefreshToggle = document.getElementById('autoRefreshEnabled');
+    if (autoRefreshToggle) {
+      autoRefreshToggle.checked = this.settings.autoRefreshEnabled !== false;
+    }
     
     // Update statistics
     this.updateStatistics();
@@ -118,6 +132,8 @@ class PopupManager {
       // 通知content script更新状态
       if (key === 'autoReplyEnabled') {
         this.notifyContentScript();
+      } else if (key === 'autoRefreshEnabled') {
+        this.notifyContentScriptSettingsChanged();
       }
     } catch (error) {
       console.error('Error updating setting:', error);
@@ -132,6 +148,20 @@ class PopupManager {
         chrome.tabs.sendMessage(tab.id, { 
           action: 'autoReplyToggled',
           enabled: this.settings.autoReplyEnabled 
+        });
+      }
+    } catch (error) {
+      // Silent fail when notifying content script
+    }
+  }
+
+  async notifyContentScriptSettingsChanged() {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab && tab.url.includes('youtube.com')) {
+        chrome.tabs.sendMessage(tab.id, { 
+          action: 'settingsChanged',
+          settings: this.settings 
         });
       }
     } catch (error) {

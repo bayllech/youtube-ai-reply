@@ -13,6 +13,7 @@ class YouTubeAIReply {
       replyStyle: 'friendly',
       maxRepliesPerSession: 10,
       autoReplyEnabled: false,
+      autoRefreshEnabled: true,
       aiRole: `我的频道内容是关于AI MUSIC的，一位AI美女歌手演唱，歌手名叫Bella，来自瑞典，年龄25岁。
 你是一个友好的AI助手，会根据频道评论内容,以Bella第一人称角度生成合适的回复。
 1.回复的文本在可以适当加入emoji表情
@@ -23,6 +24,10 @@ class YouTubeAIReply {
     const result = await chrome.storage.sync.get(['settings']);
     if (!result.settings) {
       await chrome.storage.sync.set({ settings: defaultSettings });
+    } else {
+      // 合并现有设置与默认设置，确保新字段能够添加
+      const mergedSettings = { ...defaultSettings, ...result.settings };
+      await chrome.storage.sync.set({ settings: mergedSettings });
     }
   }
 
@@ -147,7 +152,24 @@ Original comment: "${commentText}"
   // Get reply settings
   async getReplySettings() {
     const settings = await chrome.storage.sync.get(['settings']);
-    return settings.settings || {};
+    const userSettings = settings.settings || {};
+    
+    // 确保包含所有必要的字段，如果缺失则使用默认值
+    const defaultSettings = {
+      enabled: false,
+      apiKey: '',
+      replyDelay: 3000,
+      replyStyle: 'friendly',
+      maxRepliesPerSession: 10,
+      autoReplyEnabled: false,
+      autoRefreshEnabled: true,
+      aiRole: `我的频道内容是关于AI MUSIC的，一位AI美女歌手演唱，歌手名叫Bella，来自瑞典，年龄25岁。
+你是一个友好的AI助手，会根据频道评论内容,以Bella第一人称角度生成合适的回复。
+1.回复的文本在可以适当加入emoji表情
+2.无法理解的直接回复一颗💗`
+    };
+    
+    return { ...defaultSettings, ...userSettings };
   }
 }
 

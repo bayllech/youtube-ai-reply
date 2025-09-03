@@ -194,6 +194,7 @@ class YouTubeCommentMonitor {
         this.settings = { ...response.settings };
         window.youtubeReplyLog?.info('设置已加载:', JSON.stringify({
           autoReplyEnabled: this.settings.autoReplyEnabled,
+          autoRefreshEnabled: this.settings.autoRefreshEnabled,
           hasApiKey: !!this.settings.apiKey,
           replyDelay: this.settings.replyDelay,
           maxRepliesPerSession: this.settings.maxRepliesPerSession
@@ -211,6 +212,7 @@ class YouTubeCommentMonitor {
         // Set default settings
         this.settings = {
           autoReplyEnabled: false,
+          autoRefreshEnabled: true,
           apiKey: '',
           replyDelay: 3000,
           replyStyle: 'friendly',
@@ -229,6 +231,7 @@ class YouTubeCommentMonitor {
       // Set default settings
       this.settings = {
         autoReplyEnabled: false,
+        autoRefreshEnabled: true,
         apiKey: '',
         replyDelay: 3000,
         replyStyle: 'friendly',
@@ -275,7 +278,19 @@ class YouTubeCommentMonitor {
           }
         }
         
-        window.youtubeReplyLog?.info('设置已更新:', { autoReply: this.settings.autoReplyEnabled });
+        // 如果自动刷新设置有变化，显示相应的状态信息
+        if (!oldSettings || oldSettings.autoRefreshEnabled !== newSettings.autoRefreshEnabled) {
+          if (newSettings.autoRefreshEnabled) {
+            window.youtubeReplyLog?.status('🔄 自动刷新已开启');
+          } else {
+            window.youtubeReplyLog?.status('⏹️ 自动刷新已关闭');
+          }
+        }
+        
+        window.youtubeReplyLog?.info('设置已更新:', { 
+          autoReply: this.settings.autoReplyEnabled, 
+          autoRefresh: this.settings.autoRefreshEnabled 
+        });
       }
     });
   }
@@ -405,12 +420,12 @@ class YouTubeCommentMonitor {
       
       if (!this.isProcessingQueue && !this.isProcessingComments) {
         // 添加防抖，避免短时间内重复调用
-        if (!this.lastCheckTime || Date.now() - this.lastCheckTime > 10000) {
+        if (!this.lastCheckTime || Date.now() - this.lastCheckTime > 5000) {
           this.lastCheckTime = Date.now();
           this.processExistingComments();
         }
       }
-    }, 60000); // 每60秒检查一次
+    }, 15000); // 每15秒检查一次
   }
 
   isCommentElement(element) {
@@ -2368,6 +2383,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ success: true });
   }
   
+  if (request.action === 'settingsChanged') {
+    // 更新所有设置
+    const oldSettings = commentMonitor.settings;
+    commentMonitor.settings = { ...request.settings };
+    
+    // 检查自动刷新设置的变化
+    if (oldSettings.autoRefreshEnabled !== request.settings.autoRefreshEnabled) {
+      if (request.settings.autoRefreshEnabled) {
+        window.youtubeReplyLog?.status('🔄 自动刷新已开启');
+      } else {
+        window.youtubeReplyLog?.status('⏹️ 自动刷新已关闭');
+      }
+    }
+    
+    // 更新日志显示的最大回复数
+    if (window.youtubeReplyLog) {
+      const maxReplies = commentMonitor.settings.maxRepliesPerSession || 10;
+      window.youtubeReplyLog.updateReplyCount(commentMonitor.sessionReplyCount, maxReplies);
+    }
+    
+    sendResponse({ success: true });
+  }
+  
   if (request.action === 'toggleLog') {
     // 处理日志窗口切换请求
     if (window.youtubeReplyLog) {
@@ -2387,10 +2425,10 @@ YouTubeCommentMonitor.prototype.setupActivityMonitoring = function() {
     const inactiveTime = now - this.lastActivityTime;
     
     // 添加调试日志
-    window.youtubeReplyLog?.debug(`🔍 检查不活动状态: 不活动时间=${Math.floor(inactiveTime/1000)}秒, autoReplyEnabled=${this.settings?.autoReplyEnabled}`);
+    window.youtubeReplyLog?.debug(`🔍 检查不活动状态: 不活动时间=${Math.floor(inactiveTime/1000)}秒, autoReplyEnabled=${this.settings?.autoReplyEnabled}, autoRefreshEnabled=${this.settings?.autoRefreshEnabled}`);
     
-    // 如果2分钟没有活动，直接刷新页面
-    if (inactiveTime > 120000 && this.settings?.autoReplyEnabled) {
+    // 如果2分钟没有活动且启用了自动刷新，则刷新页面
+    if (inactiveTime > 120000 && this.settings?.autoReplyEnabled && this.settings?.autoRefreshEnabled !== false) {
       window.youtubeReplyLog?.warning('⚠️ 长时间无活动，即将刷新页面');
       
       // 延迟2秒后刷新页面，让日志有时间显示
