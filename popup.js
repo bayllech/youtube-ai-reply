@@ -129,6 +129,11 @@ class PopupManager {
       await chrome.storage.sync.set({ settings: this.settings });
       this.showNotification('设置已保存', 'success');
       
+      // 通知background script重置对话缓存（如果是aiRole更改）
+      if (key === 'aiRole') {
+        chrome.runtime.sendMessage({ action: 'settingsUpdated', settings: this.settings });
+      }
+      
       // 通知content script更新状态
       if (key === 'autoReplyEnabled') {
         this.notifyContentScript();

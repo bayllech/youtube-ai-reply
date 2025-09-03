@@ -50,6 +50,9 @@ class YouTubeCommentMonitor {
     if (window.youtubeReplyLog) {
       window.youtubeReplyLog.info('页面已刷新，清空所有评论缓存');
     }
+    
+    // 通知background script重置对话缓存
+    chrome.runtime.sendMessage({ action: 'resetConversationCache' });
   }
 
   // 持久化缓存管理方法已移除，只使用会话级别的缓存
