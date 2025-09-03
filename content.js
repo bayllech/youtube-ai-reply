@@ -682,7 +682,7 @@ class YouTubeCommentMonitor {
         return;
       }
 
-      // 所有的评论都应该处理，不跳过任何评论
+      // 所有的评论都应该处理，不再跳过任何评论
       // Get the position of the comment
       const position = this.getElementPosition(commentElement);
       
@@ -1056,56 +1056,6 @@ class YouTubeCommentMonitor {
     return false;
   }
 
-  // 检查是否应该使用预置回复
-  shouldUsePresetReply(commentText) {
-    if (!this.settings?.localReplyRules || !this.settings?.presetReplies || this.settings.presetReplies.length === 0) {
-      return false;
-    }
-
-    const text = commentText.trim();
-    
-    // 检查是否符合本地回复规则
-    return this.settings.localReplyRules.some(rule => {
-      switch(rule) {
-        case '纯表情符号':
-          return /^[\s\S]*?[\p{Emoji_Presentation}\p{Emoji}\u200D]+[\s\S]*?$/u.test(text) && text.length < 10;
-        case '单个字或标点':
-          return text.length <= 2 && /[\u4e00-\u9fa5\w]/.test(text);
-        case '无意义的字符':
-          return /^[a-zA-Z0-9\s\W]*$/.test(text) && text.length < 5;
-        case '英文评论':
-          return /^[a-zA-Z\s\W]+$/.test(text) && text.length > 0;
-        case '数字评论':
-          return /^[0-9]+$/.test(text);
-        case '链接评论':
-          return /http|www\.|\.com|\.cn|\.net/.test(text);
-        case '太短的评论':
-          return text.length < 5;
-        case '太长的评论':
-          return text.length > 100;
-        case '重复内容':
-          return /(.)\1{4,}/.test(text); // 检测连续重复的字符
-        default:
-          // 尝试匹配自定义规则描述中的关键词
-          if (rule.includes('表情')) return /^[\s\S]*?[\p{Emoji_Presentation}\p{Emoji}\u200D]+[\s\S]*?$/u.test(text);
-          if (rule.includes('英文') || rule.includes('English')) return /^[a-zA-Z\s\W]+$/.test(text);
-          if (rule.includes('数字')) return /^[0-9\s]+$/.test(text);
-          if (rule.includes('链接') || rule.includes('http')) return /http|www\.|\.com|\.cn|\.net/.test(text);
-          if (rule.includes('短') || rule.includes('少')) return text.length < 5;
-          if (rule.includes('长') || rule.includes('多')) return text.length > 100;
-          return false;
-      }
-    });
-  }
-
-  // 获取随机预置回复
-  getRandomPresetReply() {
-    const replies = this.settings?.presetReplies;
-    if (!replies || replies.length === 0) {
-      return '感谢你的评论！💖'; // 默认回复
-    }
-    return replies[Math.floor(Math.random() * replies.length)];
-  }
 
   isEmojiHeavy(text) {
     // Remove all emojis and check what's left
@@ -1136,35 +1086,6 @@ class YouTubeCommentMonitor {
     return emojiReplies[Math.floor(Math.random() * emojiReplies.length)];
   }
 
-  shouldSkipComment(text) {
-    // Skip very short comments that are just exclamations or single words
-    const skipPatterns = [
-      /^[a-zA-Z]{1,3}$/,  // Single words like "Wow", "AI", "ia", etc.
-      /^[!?.,]{1,5}$/,    // Just punctuation
-      /^(lol|wow|omg|wtf|idk|btw|imho)$/i,  // Common short acronyms
-      /^(yes|no|ok|okay|nice|good|bad|cool)$/i,  // Simple reactions
-      /^[ha]{2,}$/,       // Laughter like "haha"
-      /^\s*$/            // Empty or whitespace only
-    ];
-    
-    const trimmedText = text.trim();
-    
-    // Skip if text is less than 4 characters (after trimming)
-    if (trimmedText.length < 4) {
-      window.youtubeReplyLog?.debug(`跳过评论: 长度小于4个字符 - "${text}"`);
-      return true;
-    }
-    
-    // Check against skip patterns
-    for (const pattern of skipPatterns) {
-      if (pattern.test(trimmedText)) {
-        window.youtubeReplyLog?.debug(`跳过评论: 匹配跳过规则 - "${text}"`);
-        return true;
-      }
-    }
-    
-    return false;
-  }
 
   async clickLikeButton(commentElement) {
     try {

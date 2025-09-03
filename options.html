@@ -149,51 +149,6 @@
       background-color: #218838;
     }
     
-    .preset-replies {
-      margin-top: 15px;
-    }
-    
-    .preset-item {
-      display: flex;
-      align-items: center;
-      padding: 10px;
-      border: 1px solid #e9ecef;
-      border-radius: 4px;
-      margin-bottom: 10px;
-      background: #f8f9fa;
-    }
-    
-    .preset-item input {
-      flex: 1;
-      margin-right: 10px;
-    }
-    
-    .preset-item .btn {
-      margin-right: 5px;
-    }
-    
-    .skip-rules {
-      margin-top: 15px;
-    }
-    
-    .rule-item {
-      display: flex;
-      align-items: center;
-      padding: 10px;
-      border: 1px solid #e9ecef;
-      border-radius: 4px;
-      margin-bottom: 10px;
-      background: #f8f9fa;
-    }
-    
-    .rule-item input {
-      flex: 1;
-      margin-right: 10px;
-    }
-    
-    .rule-item .btn {
-      margin-right: 5px;
-    }
     
     .notification {
       position: fixed;
@@ -269,18 +224,6 @@
       transform: translateX(26px);
     }
     
-    .example-reply {
-      background: white;
-      padding: 4px 8px;
-      border-radius: 4px;
-      font-size: 13px;
-      cursor: pointer;
-      transition: background-color 0.2s;
-    }
-    
-    .example-reply:hover {
-      background-color: #f0f0f0;
-    }
   </style>
 </head>
 <body>
@@ -336,74 +279,6 @@
         </div>
       </div>
       
-      <!-- 预置回复 -->
-      <div class="section">
-        <h2>预置回复内容</h2>
-        <div class="form-group">
-          <label>添加预置回复</label>
-          <div style="display: flex; gap: 10px;">
-            <input type="text" id="newPresetReply" placeholder="输入预置回复内容，如：感谢你的支持！💖">
-            <button class="btn btn-primary" id="addPresetReplyBtn">添加</button>
-          </div>
-          <p class="small">当评论符合本地回复规则时，将从这些预置回复中随机选择一条</p>
-          <div style="background: #f3e5f5; padding: 12px; border-radius: 6px; margin-top: 10px; border-left: 4px solid #9c27b0;">
-            <strong style="color: #7b1fa2;">💬 示例回复：</strong>
-            <div style="margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px;">
-              <span class="example-reply" data-value="感谢你的评论！💖">感谢你的评论！💖</span>
-              <span class="example-reply" data-value="谢谢你的支持！🎵">谢谢你的支持！🎵</span>
-              <span class="example-reply" data-value="很高兴你喜欢我的音乐！🎶">很高兴你喜欢我的音乐！🎶</span>
-            </div>
-          </div>
-        </div>
-        
-        <div class="preset-replies" id="presetReplies">
-          <!-- 预置回复列表将在这里动态生成 -->
-        </div>
-      </div>
-      
-      <!-- 本地回复规则 -->
-      <div class="section">
-        <h2>本地回复规则</h2>
-        <div class="form-group">
-          <label>选择本地回复规则</label>
-          <div style="display: flex; gap: 10px;">
-            <select id="skipRuleSelect" style="flex: 1; padding: 8px;">
-              <option value="">-- 选择要添加的规则 --</option>
-              <optgroup label="基础规则">
-                <option value="纯表情符号">纯表情符号（只含表情且长度<10）</option>
-                <option value="单个字或标点">单个字或标点（长度≤2个字符）</option>
-                <option value="无意义的字符">无意义的字符（纯符号且长度<5）</option>
-              </optgroup>
-              <optgroup label="内容类型规则">
-                <option value="英文评论">英文评论（只包含英文字母）</option>
-                <option value="数字评论">数字评论（只包含数字）</option>
-                <option value="链接评论">链接评论（包含网址链接）</option>
-              </optgroup>
-              <optgroup label="长度规则">
-                <option value="太短的评论">太短的评论（长度小于5个字符）</option>
-                <option value="太长的评论">太长的评论（长度大于100个字符）</option>
-              </optgroup>
-              <optgroup label="质量规则">
-                <option value="重复内容">重复内容（有连续重复字符）</option>
-              </optgroup>
-            </select>
-            <button class="btn btn-primary" id="addSkipRuleBtn">添加规则</button>
-          </div>
-          <p class="small">选择规则后点击添加，符合规则的评论将使用预置回复</p>
-          <div style="background: #e7f3ff; padding: 12px; border-radius: 6px; margin-top: 15px; border-left: 4px solid #2196f3;">
-            <strong style="color: #1976d2;">💡 使用提示：</strong>
-            <ul style="margin: 8px 0; padding-left: 20px; color: #424242;">
-              <li>建议选择"纯表情符号"、"单个字或标点"等基础规则</li>
-              <li>可以添加多个规则，满足任一规则就会使用预置回复</li>
-              <li>记得在下方预置回复中添加一些通用回复内容</li>
-            </ul>
-          </div>
-        </div>
-        
-        <div class="skip-rules" id="skipRules">
-          <!-- 本地回复规则列表将在这里动态生成 -->
-        </div>
-      </div>
       
       <!-- 保存按钮 -->
       <div style="text-align: center; margin-top: 30px;">

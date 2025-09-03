@@ -5,7 +5,7 @@ class YouTubeAIReply {
   }
 
   async initializeAPI() {
-    // Initialize with default settings
+    // 初始化默认设置（不再包含预置回复和跳过规则）
     const defaultSettings = {
       enabled: false,
       apiKey: '',
@@ -16,18 +16,7 @@ class YouTubeAIReply {
       aiRole: `我的频道内容是关于AI MUSIC的，一位AI美女歌手演唱，歌手名叫Bella，来自瑞典，年龄25岁。
 你是一个友好的AI助手，会根据频道评论内容,以Bella第一人称角度生成合适的回复。
 1.回复的文本在可以适当加入emoji表情
-2.无法理解的直接回复一颗💗`,
-      presetReplies: [
-        '感谢你的评论！💖',
-        '谢谢你的支持！🎵',
-        '很高兴你喜欢我的音乐！🎶',
-        '你的评论让我很开心！😊'
-      ],
-      localReplyRules: [
-        '纯表情符号',
-        '单个字或标点',
-        '无意义的字符'
-      ]
+2.无法理解的直接回复一颗💗`
     };
 
     // Set default settings if not exists
@@ -109,56 +98,6 @@ class YouTubeAIReply {
     }
   }
 
-  // 检查是否应该使用预置回复
-  shouldUsePresetReply(commentText, config) {
-    if (!config.localReplyRules || !config.presetReplies || config.presetReplies.length === 0) {
-      return false;
-    }
-
-    const text = commentText.trim();
-    
-    // 检查是否符合本地回复规则
-    return config.localReplyRules.some(rule => {
-      switch(rule) {
-        case '纯表情符号':
-          return /^[\s\S]*?[\p{Emoji_Presentation}\p{Emoji}\u200D]+[\s\S]*?$/u.test(text) && text.length < 10;
-        case '单个字或标点':
-          return text.length <= 2 && /[\u4e00-\u9fa5\w]/.test(text);
-        case '无意义的字符':
-          return /^[a-zA-Z0-9\s\W]*$/.test(text) && text.length < 5;
-        case '英文评论':
-          return /^[a-zA-Z\s\W]+$/.test(text) && text.length > 0;
-        case '数字评论':
-          return /^[0-9]+$/.test(text);
-        case '链接评论':
-          return /http|www\.|\.com|\.cn|\.net/.test(text);
-        case '太短的评论':
-          return text.length < 5;
-        case '太长的评论':
-          return text.length > 100;
-        case '重复内容':
-          return /(.)\1{4,}/.test(text); // 检测连续重复的字符
-        default:
-          // 尝试匹配自定义规则描述中的关键词
-          if (rule.includes('表情')) return /^[\s\S]*?[\p{Emoji_Presentation}\p{Emoji}\u200D]+[\s\S]*?$/u.test(text);
-          if (rule.includes('英文') || rule.includes('English')) return /^[a-zA-Z\s\W]+$/.test(text);
-          if (rule.includes('数字')) return /^[0-9\s]+$/.test(text);
-          if (rule.includes('链接') || rule.includes('http')) return /http|www\.|\.com|\.cn|\.net/.test(text);
-          if (rule.includes('短') || rule.includes('少')) return text.length < 5;
-          if (rule.includes('长') || rule.includes('多')) return text.length > 100;
-          return false;
-      }
-    });
-  }
-
-  // 获取随机预置回复
-  getRandomPresetReply(config) {
-    const replies = config.presetReplies;
-    if (!replies || replies.length === 0) {
-      return '感谢你的评论！💖'; // 默认回复
-    }
-    return replies[Math.floor(Math.random() * replies.length)];
-  }
 
   buildPrompt(commentText, style, config) {
     const aiRole = config?.aiRole || `我的频道内容是关于AI MUSIC的，一位AI美女歌手演唱，歌手名叫Bella，来自瑞典，年龄25岁。
