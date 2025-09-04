@@ -15,6 +15,8 @@ class FloatingLogWindow {
         this.isIndicatorDragging = false;
         this.dragOffset = { x: 0, y: 0 };
         this.isPositioned = false;
+        this.isAutoScrollEnabled = true;
+        this.userScrolled = false;
         this.init();
     }
 
@@ -51,7 +53,7 @@ class FloatingLogWindow {
             <div id="youtube-reply-log-header">
                 <span>YouTube AI Reply 日志</span>
                 <div class="header-controls">
-                    <button id="youtube-reply-log-reset">重置设置</button>
+                    <button id="youtube-reply-log-scroll-bottom" title="回到底部继续自动滚动">↓</button>
                     <button id="youtube-reply-log-clear">清空</button>
                     <button id="youtube-reply-log-close">×</button>
                 </div>
@@ -197,6 +199,22 @@ class FloatingLogWindow {
                 gap: 5px;
             }
             
+            #youtube-reply-log-scroll-bottom {
+                background: rgba(255,255,255,0.2);
+                border: 1px solid rgba(255,255,255,0.3);
+                color: white;
+                padding: 4px 8px;
+                border-radius: 4px;
+                font-size: 12px;
+                cursor: pointer;
+                transition: all 0.2s;
+            }
+            
+            #youtube-reply-log-scroll-bottom:hover {
+                background: rgba(255,255,255,0.3);
+                transform: scale(1.1);
+            }
+            
             #youtube-reply-log-content {
                 flex: 1;
                 overflow-y: auto;
@@ -288,12 +306,12 @@ class FloatingLogWindow {
         document.body.appendChild(this.window);
 
         // Setup buttons
-        document.getElementById('youtube-reply-log-reset').addEventListener('click', () => {
-            this.resetSettings();
-        });
-
         document.getElementById('youtube-reply-log-clear').addEventListener('click', () => {
             this.clearLogs();
+        });
+
+        document.getElementById('youtube-reply-log-scroll-bottom').addEventListener('click', () => {
+            this.scrollToBottomAndEnableAutoScroll();
         });
 
         document.getElementById('youtube-reply-log-close').addEventListener('click', () => {
@@ -359,6 +377,12 @@ class FloatingLogWindow {
                     }
                 }, 500);
             }
+        });
+        
+        // 添加滚动事件监听器
+        const content = document.getElementById('youtube-reply-log-content');
+        content.addEventListener('scroll', () => {
+            this.handleScroll();
         });
         
         // 面板本身的鼠标事件
@@ -448,7 +472,11 @@ class FloatingLogWindow {
         
         entry.textContent = text;
         content.appendChild(entry);
-        content.scrollTop = content.scrollHeight;
+        
+        // 只有在启用自动滚动且用户未手动滚动时才自动滚动到底部
+        if (this.isAutoScrollEnabled && !this.userScrolled) {
+            content.scrollTop = content.scrollHeight;
+        }
     }
 
     show() {
@@ -492,54 +520,6 @@ class FloatingLogWindow {
         const content = this.panel.querySelector('#youtube-reply-log-content');
         if (content) {
             content.innerHTML = '';
-        }
-    }
-    
-    async resetSettings() {
-        try {
-            const defaultSettings = {
-                enabled: false,
-                apiKey: '',
-                replyDelay: 3000,
-                replyStyle: 'friendly',
-                maxRepliesPerSession: 10,
-                autoReplyEnabled: false,
-                aiRole: `我的频道内容是关于AI MUSIC的，一位AI美女歌手演唱，歌手名叫Bella，来自瑞典，年龄25岁。
-你是一个友好的AI助手，会根据频道评论内容,以Bella第一人称角度生成合适的回复。
-1.回复的文本在可以适当加入emoji表情
-2.无法理解的直接回复一颗💗`,
-                presetReplies: [
-                    '感谢你的评论！💖',
-                    '谢谢你的支持！🎵',
-                    '很高兴你喜欢我的音乐！🎶',
-                    '你的评论让我很开心！😊'
-                ],
-                localReplyRules: [
-                    '纯表情符号',
-                    '单个字或标点',
-                    '无意义的字符'
-                ]
-            };
-            
-            // 保存默认设置
-            const response = await chrome.runtime.sendMessage({ 
-                action: 'saveSettings', 
-                settings: defaultSettings 
-            });
-            
-            if (response && response.success) {
-                this.addLog('success', '设置已重置为默认值');
-                
-                // 通知页面重新加载设置
-                if (window.commentMonitor) {
-                    window.commentMonitor.loadSettings();
-                }
-            } else {
-                throw new Error('保存失败');
-            }
-            
-        } catch (error) {
-            this.addLog('error', '重置设置失败: ' + error.message);
         }
     }
     
@@ -655,6 +635,37 @@ class FloatingLogWindow {
                 }
             }
         });
+    }
+
+    // 处理滚动事件
+    handleScroll() {
+        const content = document.getElementById('youtube-reply-log-content');
+        const isAtBottom = content.scrollHeight - content.scrollTop <= content.clientHeight + 50; // 50px阈值
+        
+        if (isAtBottom) {
+            // 用户滚动到底部，重新启用自动滚动
+            if (this.userScrolled) {
+                this.userScrolled = false;
+                this.isAutoScrollEnabled = true;
+                this.addLog('info', '已重新启用自动滚动');
+            }
+        } else {
+            // 用户不在底部，禁用自动滚动
+            if (!this.userScrolled) {
+                this.userScrolled = true;
+                this.isAutoScrollEnabled = false;
+                this.addLog('info', '已暂停自动滚动，可点击↓按钮恢复');
+            }
+        }
+    }
+
+    // 滚动到底部并启用自动滚动
+    scrollToBottomAndEnableAutoScroll() {
+        const content = document.getElementById('youtube-reply-log-content');
+        content.scrollTop = content.scrollHeight;
+        this.userScrolled = false;
+        this.isAutoScrollEnabled = true;
+        this.addLog('info', '已恢复自动滚动');
     }
 }
 
