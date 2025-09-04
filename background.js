@@ -15,6 +15,8 @@ class YouTubeAIReply {
       maxRepliesPerSession: 10,
       autoReplyEnabled: false,
       autoRefreshEnabled: true,
+      defaultReply: '🖤',
+      emojiReply: '🤍🤍🩵🩵❤️❤️❤️‍🔥❤️‍🔥😻😻🌹🌹💓💓🫶🫶',
       aiRole: `我的频道内容是关于AI MUSIC的，一位AI美女歌手演唱，歌手名叫Bella，来自瑞典，年龄25岁。
 你是一个友好的AI助手，会根据频道评论内容,以Bella第一人称角度生成合适的回复。
 1.回复的文本在可以适当加入emoji表情
@@ -170,11 +172,23 @@ class YouTubeAIReply {
     
     return `${userRole}
 
-重要：你必须严格按照以下JSON格式回复所有评论：
+重要：你必须严格按照以下JSON格式回复所有评论，并根据评论质量选择对应的actions：
+
+质量评估标准：
+- excellent: 评论内容深入、有见解、表达真诚或极具创意
+- good: 评论积极正面、表达支持或简单但有意义的反馈  
+- average: 普通评论、简单表达或内容较少
+
+操作规则：
+- excellent质量：同时点赞和点红心 ["like", "heart"]
+- good质量：只点赞 ["like"]
+- average质量：不进行任何操作 []
+
+请按照以下JSON格式回复：
 {
   "reply": "你的回复内容",
   "quality": "excellent|good|average",
-  "actions": ["like", "heart"]
+  "actions": ["根据上述规则选择对应的操作数组"]
 }`;
   }
 
@@ -221,7 +235,19 @@ Original comment: "${commentText}"
 质量评估：
 - excellent: 深入有见解的内容
 - good: 积极正面的反馈
-- average: 普通简单的评论`;
+- average: 普通简单的评论
+
+操作规则：
+- excellent质量：同时点赞和点红心 ["like", "heart"]
+- good质量：只点赞 ["like"]
+- average质量：不进行任何操作 []
+
+请按照JSON格式回复：
+{
+  "reply": "你的回复内容",
+  "quality": "excellent|good|average",
+  "actions": ["根据上述规则选择对应的操作数组"]
+}`;
   }
 
   // 重置对话缓存（页面刷新时调用）
@@ -250,6 +276,8 @@ Original comment: "${commentText}"
       maxRepliesPerSession: 10,
       autoReplyEnabled: false,
       autoRefreshEnabled: true,
+      defaultReply: '🖤',
+      emojiReply: '🤍🤍🩵🩵❤️❤️❤️‍🔥❤️‍🔥😻😻🌹🌹💓💓🫶🫶',
       aiRole: `我的频道内容是关于AI MUSIC的，一位AI美女歌手演唱，歌手名叫Bella，来自瑞典，年龄25岁。
 你是一个友好的AI助手，会根据频道评论内容,以Bella第一人称角度生成合适的回复。
 1.回复的文本在可以适当加入emoji表情

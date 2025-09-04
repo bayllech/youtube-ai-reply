@@ -1437,7 +1437,7 @@ class YouTubeCommentMonitor {
       // 检查是否为纯表情评论，如果是则直接使用指定回复
       if (this.isPureEmoji(comment.commentText)) {
         window.youtubeReplyLog?.info('🎭 检测到纯表情评论，使用指定回复');
-        replyText = '🤍🤍🩵🩵❤️❤️❤️‍🔥❤️‍🔥😻😻🌹🌹💓💓🫶🫶';
+        replyText = this.settings?.emojiReply || '🤍🤍🩵🩵❤️❤️❤️‍🔥❤️‍🔥😻😻🌹🌹💓💓🫶🫶';
         window.youtubeReplyLog?.success('✅ 已使用纯表情回复');
         window.youtubeReplyLog?.info(`💬 回复内容: ${replyText}`);
         
@@ -1466,7 +1466,7 @@ class YouTubeCommentMonitor {
           window.youtubeReplyLog?.info('🔧 使用默认回复: 🖤');
           
           // 使用默认回复
-          replyText = '🖤';
+          replyText = this.settings?.defaultReply || '🖤';
           
           // 跳过AI响应处理，直接发布回复
           window.youtubeReplyLog?.success('✅ 已使用默认回复');
@@ -1508,7 +1508,7 @@ class YouTubeCommentMonitor {
       // 确保replyText有定义
       if (!replyText) {
         window.youtubeReplyLog?.error('❌ 回复内容未生成，使用默认回复');
-        replyText = '🖤';
+        replyText = this.settings?.defaultReply || '🖤';
       }
 
       // Post the reply
@@ -1516,7 +1516,9 @@ class YouTubeCommentMonitor {
       await this.postReply(comment.element, replyText);
 
       // 根据AI判断执行点赞和点红心操作（仅在使用AI回复时）
-      if (replyText !== '🖤' && replyText !== '🤍🤍🩵🩵❤️❤️❤️‍🔥❤️‍🔥😻😻🌹🌹💓💓🫶🫶' && typeof aiResponse === 'object' && aiResponse !== null && aiResponse.actions) {
+      const defaultReply = this.settings?.defaultReply || '🖤';
+      const emojiReply = this.settings?.emojiReply || '🤍🤍🩵🩵❤️❤️❤️‍🔥❤️‍🔥😻😻🌹🌹💓💓🫶🫶';
+      if (replyText !== defaultReply && replyText !== emojiReply && typeof aiResponse === 'object' && aiResponse !== null && aiResponse.actions) {
         const actions = aiResponse.actions;
         if (actions.includes('like')) {
           window.youtubeReplyLog?.processing('👍 正在点赞...');

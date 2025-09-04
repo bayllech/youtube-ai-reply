@@ -29,6 +29,8 @@ class OptionsManager {
       replyStyle: 'friendly',
       maxRepliesPerSession: 10,
       autoReplyEnabled: false,
+      defaultReply: '🖤',
+      emojiReply: '🤍🤍🩵🩵❤️❤️❤️‍🔥❤️‍🔥😻😻🌹🌹💓💓🫶🫶',
       aiRole: `我的频道内容是关于AI MUSIC的，一位AI美女歌手演唱，歌手名叫Bella，来自瑞典，年龄25岁。
 你是一个友好的AI助手，会根据频道评论内容,以Bella第一人称角度生成合适的回复。
 1.回复的文本在可以适当加入emoji表情
@@ -42,6 +44,8 @@ class OptionsManager {
     document.getElementById('replyDelay').value = this.settings.replyDelay || 3000;
     document.getElementById('maxReplies').value = this.settings.maxRepliesPerSession || 10;
     document.getElementById('replyStyle').value = this.settings.replyStyle || 'friendly';
+    document.getElementById('defaultReply').value = this.settings.defaultReply || '🖤';
+    document.getElementById('emojiReply').value = this.settings.emojiReply || '🤍🤍🩵🩵❤️❤️❤️‍🔥❤️‍🔥😻😻🌹🌹💓💓🫶🫶';
     document.getElementById('aiRole').value = this.settings.aiRole || this.getDefaultSettings().aiRole;
     
   }
@@ -67,6 +71,14 @@ class OptionsManager {
     
     document.getElementById('aiRole').addEventListener('input', (e) => {
       this.settings.aiRole = e.target.value;
+    });
+    
+    document.getElementById('defaultReply').addEventListener('input', (e) => {
+      this.settings.defaultReply = e.target.value;
+    });
+    
+    document.getElementById('emojiReply').addEventListener('input', (e) => {
+      this.settings.emojiReply = e.target.value;
     });
     
     

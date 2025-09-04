@@ -245,14 +245,26 @@
         </div>
         
         <div class="form-group">
-          <label for="replyDelay">回复延迟 (毫秒)</label>
+          <label for="replyDelay">评论间隔回复延迟 (毫秒)</label>
           <input type="number" id="replyDelay" min="1000" max="30000" value="3000">
-          <p class="small">建议设置3-5秒以避免被检测</p>
+          <p class="small">处理完一条评论后，等待多长时间再处理下一条评论。建议3-5秒以避免操作过快被YouTube检测</p>
         </div>
         
         <div class="form-group">
           <label for="maxReplies">单次最大回复数</label>
           <input type="number" id="maxReplies" min="1" max="100" value="10">
+        </div>
+        
+        <div class="form-group">
+          <label for="defaultReply">AI失败默认回复</label>
+          <input type="text" id="defaultReply" value="🖤" placeholder="当AI调用失败时的默认回复内容">
+          <p class="small">当AI请求失败时使用的默认回复内容</p>
+        </div>
+        
+        <div class="form-group">
+          <label for="emojiReply">纯表情评论回复</label>
+          <input type="text" id="emojiReply" value="🤍🤍🩵🩵❤️❤️❤️‍🔥❤️‍🔥😻😻🌹🌹💓💓🫶🫶" placeholder="当检测到纯表情评论时的回复内容">
+          <p class="small">当检测到评论只包含emoji表情时使用的回复内容</p>
         </div>
         
         <div class="form-group">
