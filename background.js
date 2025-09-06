@@ -11,8 +11,8 @@ class YouTubeAIReply {
       enabled: false,
       apiKey: '',
       replyDelay: 3000,
-      replyStyle: 'friendly',
       maxRepliesPerSession: 10,
+      maxDaysFilter: 10, // 新增：评论时间过滤天数
       autoReplyEnabled: false,
       autoRefreshEnabled: true,
       defaultReply: '🖤',

@@ -528,11 +528,23 @@ class YouTubeCommentMonitor {
               position: position
             };
           }).filter(comment => {
+            const maxDays = this.settings?.maxDaysFilter || 10; // 使用配置的天数
             const shouldProcess = !this.isCommentProcessed(comment.id) && 
                                   comment.text && 
-                                  comment.text.trim().length > 0;
+                                  comment.text.trim().length > 0 &&
+                                  !this.isCommentTooOld(comment.element, maxDays, comment.text, false); // 不输出日志，避免重复
             if (!shouldProcess) {
-              window.youtubeReplyLog?.debug(`⏭️ 跳过评论: ID=${comment.id}, 已处理=${this.isCommentProcessed(comment.id)}, 有文本=${!!comment.text}`);
+              // 只在这里统一输出跳过原因的日志
+              if (this.isCommentTooOld(comment.element, maxDays, comment.text, false)) {
+                // 时间过旧的情况已经在上面的检查中静默处理，这里再次调用只是为了统一输出日志
+                const timeString = this.getCommentTimeString(comment.element);
+                const daysAgo = timeString ? this.parseTimeString(timeString) : 0;
+                window.youtubeReplyLog?.debug(`⏰ 跳过过旧评论: ${timeString || '未知时间'} (${daysAgo.toFixed(1)}天前) - "${comment.text.substring(0, 30)}..."`);
+              } else if (this.isCommentProcessed(comment.id)) {
+                window.youtubeReplyLog?.debug(`⏭️ 跳过已处理评论 - "${comment.text.substring(0, 30)}..."`);
+              } else {
+                window.youtubeReplyLog?.debug(`⏭️ 跳过评论: 无有效文本`);
+              }
             }
             return shouldProcess;
           }).sort((a, b) => a.position - b.position);
@@ -711,13 +723,19 @@ class YouTubeCommentMonitor {
         return;
       }
       
-      // 6. 检查是否为频道作者自己的评论
+      // 6. 检查评论时间是否过旧
+      const maxDays = this.settings?.maxDaysFilter || 10; // 使用配置的天数，默认10天
+      if (this.isCommentTooOld(commentElement, maxDays, commentText, true)) {
+        return; // 评论超过配置天数，跳过处理
+      }
+      
+      // 7. 检查是否为频道作者自己的评论
       if (this.isChannelOwnerComment(commentElement)) {
         window.youtubeReplyLog?.info('跳过频道作者自己的评论');
         return;
       }
       
-      // 7. 检查频道作者是否已经回复过该评论
+      // 8. 检查频道作者是否已经回复过该评论
       if (this.hasChannelOwnerReplied(commentElement)) {
         window.youtubeReplyLog?.info('跳过已有频道作者回复的评论');
         return;
@@ -862,12 +880,7 @@ class YouTubeCommentMonitor {
 
   // 检查是否有相似的已处理评论
   hasSimilarComment(commentText, authorName) {
-    const persistentCache = this.loadPersistentCache();
-    const allProcessedIds = new Set([
-      ...this.processedComments,
-      ...persistentCache
-    ]);
-    
+    // 只使用内存缓存，不使用持久化缓存（已移除）
     // 检查最近处理的文本
     for (const [key, value] of this.lastProcessedTexts) {
       if (Date.now() - value.timestamp < 60000) { // 1分钟内
@@ -880,6 +893,132 @@ class YouTubeCommentMonitor {
     }
     
     return false;
+  }
+
+  // 解析时间字符串，返回距离现在的天数
+  parseTimeString(timeString) {
+    try {
+      if (!timeString || typeof timeString !== 'string') {
+        return 0;
+      }
+      
+      // 清理时间字符串
+      const cleanTime = timeString.trim().toLowerCase();
+      
+      // 匹配各种时间格式的正则表达式
+      const timeRegex = /(\d+)\s*(秒|分钟?|小时|天|周|个?月|年)前?/;
+      const match = cleanTime.match(timeRegex);
+      
+      if (!match) {
+        // 如果无法解析，返回0天（认为是最新的）
+        return 0;
+      }
+      
+      const number = parseInt(match[1]);
+      const unit = match[2];
+      
+      // 将不同时间单位转换为天数
+      switch (unit) {
+        case '秒':
+          return number / (24 * 60 * 60); // 秒转天
+        case '分钟':
+        case '分':
+          return number / (24 * 60); // 分钟转天
+        case '小时':
+          return number / 24; // 小时转天
+        case '天':
+          return number; // 天
+        case '周':
+          return number * 7; // 周转天
+        case '个月':
+        case '月':
+          return number * 30; // 月转天（粗略估算）
+        case '年':
+          return number * 365; // 年转天
+        default:
+          return 0;
+      }
+    } catch (error) {
+      window.youtubeReplyLog?.debug(`时间解析错误: ${error.message}，时间字符串: ${timeString}`);
+      return 0; // 解析出错时返回0天，允许处理
+    }
+  }
+
+  // 获取评论的时间信息
+  getCommentTimeString(commentElement) {
+    try {
+      // 查找时间元素，使用多种选择器
+      const timeElement = commentElement.querySelector('.published-time-text') ||
+                         commentElement.querySelector('.yt-formatted-string.published-time-text') ||
+                         commentElement.querySelector('yt-formatted-string[class*="published-time"]') ||
+                         commentElement.closest('ytcp-comment')?.querySelector('.published-time-text') ||
+                         commentElement.closest('ytcp-comment-thread')?.querySelector('.published-time-text');
+      
+      if (timeElement) {
+        const timeText = timeElement.textContent?.trim();
+        if (timeText) {
+          return timeText;
+        }
+      }
+      
+      // 备用方案：在父级容器中查找时间信息
+      const commentContainer = commentElement.closest('ytcp-comment') || 
+                              commentElement.closest('ytcp-comment-thread');
+      
+      if (commentContainer) {
+        // 查找所有可能的时间文本元素
+        const timeElements = commentContainer.querySelectorAll(
+          '.published-time-text, [class*="time"], [class*="date"], yt-formatted-string'
+        );
+        
+        for (const element of timeElements) {
+          const text = element.textContent?.trim();
+          if (text && (text.includes('前') || text.includes('ago'))) {
+            return text;
+          }
+        }
+      }
+      
+      return null;
+    } catch (error) {
+      window.youtubeReplyLog?.debug(`获取评论时间失败: ${error.message}`);
+      return null;
+    }
+  }
+
+  // 检查评论时间是否超过限制
+  isCommentTooOld(commentElement, maxDays = 10, commentText = null, logOutput = true) {
+    try {
+      const timeString = this.getCommentTimeString(commentElement);
+      
+      if (!timeString) {
+        // 无法获取时间信息，允许处理（保守策略）
+        if (logOutput) {
+          window.youtubeReplyLog?.debug('无法获取评论时间，允许处理');
+        }
+        return false;
+      }
+      
+      const daysAgo = this.parseTimeString(timeString);
+      const isTooOld = daysAgo > maxDays;
+      
+      // 只在需要时输出日志，并包含评论内容
+      if (logOutput) {
+        const truncatedComment = commentText ? ` - "${commentText.substring(0, 30)}..."` : '';
+        if (isTooOld) {
+          window.youtubeReplyLog?.info(`⏰ 跳过过旧评论: ${timeString} (${daysAgo.toFixed(1)}天前)${truncatedComment}`);
+        } else {
+          window.youtubeReplyLog?.debug(`⏰ 评论时间检查: ${timeString} (${daysAgo.toFixed(1)}天前)${truncatedComment} - 允许处理`);
+        }
+      }
+      
+      return isTooOld;
+    } catch (error) {
+      if (logOutput) {
+        window.youtubeReplyLog?.debug(`时间检查错误: ${error.message}，允许处理`);
+      }
+      return false; // 出错时允许处理
+    }
   }
   
   getElementPosition(element) {

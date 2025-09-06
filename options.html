@@ -256,6 +256,12 @@
         </div>
         
         <div class="form-group">
+          <label for="maxDaysFilter">评论时间过滤 (天)</label>
+          <input type="number" id="maxDaysFilter" min="1" max="365" value="10">
+          <p class="small">只回复发布时间在指定天数内的评论，超过此天数的评论将被跳过</p>
+        </div>
+        
+        <div class="form-group">
           <label for="defaultReply">AI失败默认回复</label>
           <input type="text" id="defaultReply" value="🖤" placeholder="当AI调用失败时的默认回复内容">
           <p class="small">当AI请求失败时使用的默认回复内容</p>
@@ -265,16 +271,6 @@
           <label for="emojiReply">纯表情评论回复</label>
           <input type="text" id="emojiReply" value="🤍🤍🩵🩵❤️❤️❤️‍🔥❤️‍🔥😻😻🌹🌹💓💓🫶🫶" placeholder="当检测到纯表情评论时的回复内容">
           <p class="small">当检测到评论只包含emoji表情时使用的回复内容</p>
-        </div>
-        
-        <div class="form-group">
-          <label for="replyStyle">默认回复风格</label>
-          <select id="replyStyle">
-            <option value="friendly">友好型</option>
-            <option value="professional">专业型</option>
-            <option value="casual">随意型</option>
-            <option value="humorous">幽默型</option>
-          </select>
         </div>
       </div>
       

@@ -26,8 +26,8 @@ class OptionsManager {
     return {
       apiKey: '',
       replyDelay: 3000,
-      replyStyle: 'friendly',
       maxRepliesPerSession: 10,
+      maxDaysFilter: 10, // 新增：评论时间过滤天数
       autoReplyEnabled: false,
       defaultReply: '🖤',
       emojiReply: '🤍🤍🩵🩵❤️❤️❤️‍🔥❤️‍🔥😻😻🌹🌹💓💓🫶🫶',
@@ -43,7 +43,7 @@ class OptionsManager {
     document.getElementById('apiKey').value = this.settings.apiKey || '';
     document.getElementById('replyDelay').value = this.settings.replyDelay || 3000;
     document.getElementById('maxReplies').value = this.settings.maxRepliesPerSession || 10;
-    document.getElementById('replyStyle').value = this.settings.replyStyle || 'friendly';
+    document.getElementById('maxDaysFilter').value = this.settings.maxDaysFilter || 10; // 新增
     document.getElementById('defaultReply').value = this.settings.defaultReply || '🖤';
     document.getElementById('emojiReply').value = this.settings.emojiReply || '🤍🤍🩵🩵❤️❤️❤️‍🔥❤️‍🔥😻😻🌹🌹💓💓🫶🫶';
     document.getElementById('aiRole').value = this.settings.aiRole || this.getDefaultSettings().aiRole;
@@ -65,8 +65,8 @@ class OptionsManager {
       this.settings.maxRepliesPerSession = parseInt(e.target.value);
     });
     
-    document.getElementById('replyStyle').addEventListener('change', (e) => {
-      this.settings.replyStyle = e.target.value;
+    document.getElementById('maxDaysFilter').addEventListener('input', (e) => {
+      this.settings.maxDaysFilter = parseInt(e.target.value);
     });
     
     document.getElementById('aiRole').addEventListener('input', (e) => {
